@@ -11,5 +11,5 @@ output "desktop_pool_public_ip" {
 }
 
 output "guac_lb_ip" {
-  value = module.guac_lb.hcloud_load_balancer.lb.ipv4
+  value = module.guac_lb.ipv4
 }
