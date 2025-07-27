@@ -18,8 +18,9 @@ To provision the entire Swiss365 stack in one step you can use the
 `modules/rollout` module:
 
 ```hcl
-module "rollout" {
+ module "rollout" {
   source       = "./modules/rollout"
+  customer_id  = var.customer_id
   ssh_key_name = var.ssh_key_name
   image        = var.image
   network_cidr = var.network_cidr
@@ -28,3 +29,17 @@ module "rollout" {
 
 After applying the module the outputs provide the public IP addresses of the
 servers and the load balancer.
+
+## Multi-customer usage
+
+Use the `customer_id` variable to prefix all resource names. Create a separate
+Terraform workspace for each customer so their state files remain isolated:
+
+```bash
+terraform workspace new customerA
+terraform workspace select customerA
+terraform apply -var="customer_id=customerA"
+```
+
+You can also configure a remote backend (e.g. S3 or Terraform Cloud) and use a
+different state path per workspace for better scalability.

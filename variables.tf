@@ -3,6 +3,11 @@ variable "hcloud_token" {
   sensitive = true
 }
 
+variable "customer_id" {
+  description = "Unique identifier to prefix all resource names"
+  type        = string
+}
+
 variable "ssh_key_name" {
   type    = string
   default = "swiss365_ssh"
