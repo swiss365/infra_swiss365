@@ -7,7 +7,9 @@ modules for common server configuration and load balancer setup. The new
 provisioned with a single module call.
 
 1. Install Terraform 1.8 or newer.
-2. Export your Hetzner Cloud API token as `HCLOUD_TOKEN` (or pass it via `-var hcloud_token=...`).
+2. Copy `terraform.tfvars.example` to `terraform.tfvars` and fill in `hcloud_token`
+   and `customer_id`. Terraform will load this file automatically. You can also
+   export your API token as `HCLOUD_TOKEN` or pass it via `-var hcloud_token=...`.
 3. Run `terraform init` to download providers and modules.
 4. Execute `terraform plan` to review the resources that will be created.
 5. Finally run `terraform apply` to provision the virtual machines and load balancer.

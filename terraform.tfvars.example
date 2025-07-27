@@ -1,0 +1,3 @@
+# Example variables for Terraform
+hcloud_token = "your-hcloud-token"
+customer_id  = "example-customer"
