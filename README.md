@@ -30,6 +30,10 @@ To provision the entire Swiss365 stack in one step you can use the
 After applying the module the outputs provide the public IP addresses of the
 servers and the load balancer.
 
+Every deployment also creates a dedicated firewall named with the `customer_id`
+prefix. The firewall is automatically attached to all servers so that each
+customer's traffic is isolated.
+
 ## Multi-customer usage
 
 Use the `customer_id` variable to prefix all resource names. Create a separate
