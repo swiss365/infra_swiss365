@@ -1,5 +1,5 @@
 resource "hcloud_network" "swiss365_net" {
-  name     = "swiss365_network"
+  name     = "${var.customer_id}_network"
   ip_range = var.network_cidr
 }
 

@@ -1,6 +1,6 @@
 module "control_node" {
   source       = "./modules/server_common"
-  name         = "control_node"
+  name         = "${var.customer_id}_control"
   server_type  = "cpx31"
   image        = var.image
   network_id   = hcloud_network.swiss365_net.id
@@ -9,7 +9,7 @@ module "control_node" {
 
 module "workspace_host" {
   source       = "./modules/server_common"
-  name         = "workspace_host"
+  name         = "${var.customer_id}_workspace"
   server_type  = "cpx51"
   image        = var.image
   network_id   = hcloud_network.swiss365_net.id
@@ -18,7 +18,7 @@ module "workspace_host" {
 
 module "desktop_pool_host" {
   source       = "./modules/server_common"
-  name         = "desktop_pool_host"
+  name         = "${var.customer_id}_desktop_pool"
   server_type  = "ax102"
   image        = var.image
   network_id   = hcloud_network.swiss365_net.id

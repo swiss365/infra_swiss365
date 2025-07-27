@@ -10,6 +10,11 @@ variable "ssh_key_name" {
   type = string
 }
 
+variable "customer_id" {
+  description = "Prefix for naming resources"
+  type        = string
+}
+
 variable "image" {
   type = string
 }
@@ -20,7 +25,7 @@ variable "network_cidr" {
 
 # Network
 resource "hcloud_network" "net" {
-  name     = "swiss365_network"
+  name     = "${var.customer_id}_network"
   ip_range = var.network_cidr
 }
 
@@ -34,7 +39,7 @@ resource "hcloud_network_subnet" "subnet" {
 # Servers
 module "control_node" {
   source       = "../server_common"
-  name         = "control_node"
+  name         = "${var.customer_id}_control"
   server_type  = "cpx31"
   image        = var.image
   network_id   = hcloud_network.net.id
@@ -43,7 +48,7 @@ module "control_node" {
 
 module "workspace_host" {
   source       = "../server_common"
-  name         = "workspace_host"
+  name         = "${var.customer_id}_workspace"
   server_type  = "cpx51"
   image        = var.image
   network_id   = hcloud_network.net.id
@@ -52,7 +57,7 @@ module "workspace_host" {
 
 module "desktop_pool_host" {
   source       = "../server_common"
-  name         = "desktop_pool_host"
+  name         = "${var.customer_id}_desktop_pool"
   server_type  = "ax102"
   image        = var.image
   network_id   = hcloud_network.net.id
@@ -62,7 +67,7 @@ module "desktop_pool_host" {
 # Load balancer for Guacamole
 module "guac_lb" {
   source            = "../lb_guacamole"
-  name              = "guacamole_lb"
+  name              = "${var.customer_id}_guacamole_lb"
   target_server_ids = [module.desktop_pool_host.server_id]
   network_id        = hcloud_network.net.id
 }
