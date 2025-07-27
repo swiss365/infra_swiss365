@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    hcloud = {
+      source = "hetznercloud/hcloud"
+    }
+  }
+}
+
 variable "name" {}
 variable "server_type" {}
 variable "image" {}
@@ -18,4 +26,8 @@ resource "hcloud_server" "this" {
 
 output "ipv4" {
   value = hcloud_server.this.ipv4_address
+}
+
+output "server_id" {
+  value = hcloud_server.this.id
 }
