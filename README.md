@@ -11,6 +11,8 @@ provisioned with a single module call.
 3. Run `terraform init` to download providers and modules.
 4. Execute `terraform plan` to review the resources that will be created.
 5. Finally run `terraform apply` to provision the virtual machines and load balancer.
+   A firewall is created automatically and attached to all servers based on a
+   common `customer` label.
 
 Example usage:
 
@@ -20,6 +22,8 @@ terraform apply -var="customer_id=customerA"
 ```
 
 The `customer_id` variable is required unless you define it in a `.tfvars` file.
+All resources receive a `customer` label derived from this value so the firewall
+rules apply automatically.
 
 ## SSH key handling
 

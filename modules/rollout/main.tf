@@ -27,6 +27,9 @@ variable "network_cidr" {
 resource "hcloud_network" "net" {
   name     = "${var.customer_id}-network"
   ip_range = var.network_cidr
+  labels = {
+    customer = var.customer_id
+  }
 }
 
 resource "hcloud_network_subnet" "subnet" {
@@ -36,14 +39,42 @@ resource "hcloud_network_subnet" "subnet" {
   ip_range     = "10.20.1.0/24"
 }
 
+resource "hcloud_firewall" "fw" {
+  name = "${var.customer_id}-fw"
+  labels = {
+    customer = var.customer_id
+  }
+
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "22"
+    source_ips = ["0.0.0.0/0"]
+  }
+
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "443"
+    source_ips = ["0.0.0.0/0"]
+  }
+
+  apply_to {
+    label_selector = "customer=${var.customer_id}"
+  }
+}
+
 # Servers
 module "control_node" {
   source       = "../server_common"
   name         = "${var.customer_id}-control"
-  server_type  = "ccx63"
+  server_type  = "cpx31"
   image        = var.image
   network_id   = hcloud_network.net.id
   ssh_key_name = var.ssh_key_name
+  labels = {
+    customer = var.customer_id
+  }
 }
 
 module "workspace_host" {
@@ -53,15 +84,21 @@ module "workspace_host" {
   image        = var.image
   network_id   = hcloud_network.net.id
   ssh_key_name = var.ssh_key_name
+  labels = {
+    customer = var.customer_id
+  }
 }
 
 module "desktop_pool_host" {
   source       = "../server_common"
   name         = "${var.customer_id}-desktop-pool"
-  server_type  = "ccx63"
+  server_type  = "cpx51"
   image        = var.image
   network_id   = hcloud_network.net.id
   ssh_key_name = var.ssh_key_name
+  labels = {
+    customer = var.customer_id
+  }
 }
 
 # Load balancer for Guacamole
@@ -70,6 +107,9 @@ module "guac_lb" {
   name              = "${var.customer_id}-guacamole-lb"
   target_server_ids = [module.desktop_pool_host.server_id]
   network_id        = hcloud_network.net.id
+  labels = {
+    customer = var.customer_id
+  }
 }
 
 output "control_public_ip" {
