@@ -1,0 +1,8 @@
+all:
+  hosts:
+    control:
+      ansible_host: 65.108.54.239
+    workspace:
+      ansible_host: 135.181.82.35
+    desktop_pool:
+      ansible_host: 46.62.135.73

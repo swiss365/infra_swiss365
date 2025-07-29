@@ -64,6 +64,22 @@ To provision the entire Swiss365 stack in one step you can use the
 After applying the module the outputs provide the public IP addresses of the
 servers and the load balancer.
 
+## Connecting to the servers
+
+Retrieve the IP addresses with `terraform output` and connect via SSH using the
+key referenced in `ssh_key_name` (default: `swiss365_ssh`):
+
+```bash
+terraform output
+ssh -i /path/to/private_key root@$(terraform output -raw control_public_ip)
+ssh -i /path/to/private_key root@$(terraform output -raw workspace_public_ip)
+ssh -i /path/to/private_key root@$(terraform output -raw desktop_pool_public_ip)
+```
+
+The load balancer listens on port 443 at the address from `guac_lb_ip`. No
+services are deployed automatically, but you can use the provided Ansible
+playbook to install software on all hosts.
+
 ## Multi-customer usage
 
 Use the `customer_id` variable to prefix all resource names. Create a separate
@@ -81,4 +97,18 @@ different state path per workspace for better scalability.
 ## Deleting a workspace
 
 To remove all resources for a customer you can use the `destroy.yml` workflow. Trigger it manually in GitHub Actions and provide the Terraform workspace name and the associated `customer_id`. The workflow requires the Hetzner API token stored as the `HCLOUD_TOKEN` secret.
+
+## Example Ansible playbook
+
+You can automate software installation across all servers with Ansible. A sample
+playbook is provided in the `ansible/` directory. It installs and starts Nginx
+on each host:
+
+```bash
+cd ansible
+ansible-playbook site.yml -u root --private-key /path/to/private_key
+```
+
+Edit `ansible/inventory.yml` if the server IPs differ from the Terraform
+outputs.
 
