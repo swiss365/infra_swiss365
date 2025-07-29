@@ -11,11 +11,16 @@ variable "target_server_ids" {
   type = list(number)
 }
 variable "network_id" {}
+variable "labels" {
+  type    = map(string)
+  default = {}
+}
 
 resource "hcloud_load_balancer" "lb" {
   name               = var.name
   load_balancer_type = "lb11"
   location           = "fsn1"
+  labels             = var.labels
 }
 
 resource "hcloud_load_balancer_network" "net" {

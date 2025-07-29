@@ -1,6 +1,9 @@
 resource "hcloud_network" "swiss365_net" {
   name     = "${var.customer_id}-network"
   ip_range = var.network_cidr
+  labels = {
+    customer = var.customer_id
+  }
 }
 
 resource "hcloud_network_subnet" "swiss365_subnet" {

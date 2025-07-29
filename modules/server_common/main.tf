@@ -11,6 +11,10 @@ variable "server_type" {}
 variable "image" {}
 variable "network_id" {}
 variable "ssh_key_name" {}
+variable "labels" {
+  type    = map(string)
+  default = {}
+}
 
 resource "hcloud_server" "this" {
   name        = var.name
@@ -21,6 +25,7 @@ resource "hcloud_server" "this" {
     network_id = var.network_id
     ip         = "auto"
   }
+  labels    = var.labels
   user_data = file("${path.module}/cloud_init.yml")
 }
 
