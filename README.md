@@ -21,6 +21,34 @@ terraform apply -var="customer_id=customerA"
 
 The `customer_id` variable is required unless you define it in a `.tfvars` file.
 
+## SSH key handling
+
+Terraform expects only the **name** of an SSH key that already exists in your
+Hetzner Cloud project. Upload your public key in the Hetzner Cloud console and
+note its name (default: `swiss365_ssh`). Reference this name via the
+`ssh_key_name` variable. A minimal `terraform.tfvars` could look like:
+
+```hcl
+customer_id  = "customerA"
+ssh_key_name = "swiss365_ssh"       # name of the key uploaded at Hetzner
+```
+You can copy `terraform.tfvars.example` as a starting point for your own
+variables file.
+
+Terraform does not need the private key. Instead, store the private key on the
+machine that runs Terraform and Ansible. When using Ansible you can point to the
+key with `ANSIBLE_PRIVATE_KEY_FILE` or the `--private-key` CLI option.
+If you run these tools in a CI system such as "lovable", keep the private key as
+a secret variable and provide its path via the environment.
+
+## Naming conventions
+
+Hetzner Cloud requires resource names to be valid hostnames. The
+`customer_id` variable should therefore contain only letters, digits and
+hyphens. This module uses hyphens when composing server names (for example
+`customerA-control`). Avoid spaces or underscores in `customer_id` to prevent
+"name must be a valid hostname" errors during `terraform apply`.
+
 ## Rollout module
 
 To provision the entire Swiss365 stack in one step you can use the
