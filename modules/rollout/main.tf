@@ -40,7 +40,7 @@ resource "hcloud_network_subnet" "subnet" {
 module "control_node" {
   source       = "../server_common"
   name         = "${var.customer_id}_control"
-  server_type  = "cpx31"
+  server_type  = "ccx63"
   image        = var.image
   network_id   = hcloud_network.net.id
   ssh_key_name = var.ssh_key_name
