@@ -41,6 +41,14 @@ key with `ANSIBLE_PRIVATE_KEY_FILE` or the `--private-key` CLI option.
 If you run these tools in a CI system such as "lovable", keep the private key as
 a secret variable and provide its path via the environment.
 
+## Naming conventions
+
+Hetzner Cloud requires resource names to be valid hostnames. The
+`customer_id` variable should therefore contain only letters, digits and
+hyphens. This module uses hyphens when composing server names (for example
+`customerA-control`). Avoid spaces or underscores in `customer_id` to prevent
+"name must be a valid hostname" errors during `terraform apply`.
+
 ## Rollout module
 
 To provision the entire Swiss365 stack in one step you can use the

@@ -25,7 +25,7 @@ variable "network_cidr" {
 
 # Network
 resource "hcloud_network" "net" {
-  name     = "${var.customer_id}_network"
+  name     = "${var.customer_id}-network"
   ip_range = var.network_cidr
 }
 
@@ -39,7 +39,7 @@ resource "hcloud_network_subnet" "subnet" {
 # Servers
 module "control_node" {
   source       = "../server_common"
-  name         = "${var.customer_id}_control"
+  name         = "${var.customer_id}-control"
   server_type  = "ccx63"
   image        = var.image
   network_id   = hcloud_network.net.id
@@ -48,7 +48,7 @@ module "control_node" {
 
 module "workspace_host" {
   source       = "../server_common"
-  name         = "${var.customer_id}_workspace"
+  name         = "${var.customer_id}-workspace"
   server_type  = "cpx51"
   image        = var.image
   network_id   = hcloud_network.net.id
@@ -57,7 +57,7 @@ module "workspace_host" {
 
 module "desktop_pool_host" {
   source       = "../server_common"
-  name         = "${var.customer_id}_desktop_pool"
+  name         = "${var.customer_id}-desktop-pool"
   server_type  = "ccx63"
   image        = var.image
   network_id   = hcloud_network.net.id
@@ -67,7 +67,7 @@ module "desktop_pool_host" {
 # Load balancer for Guacamole
 module "guac_lb" {
   source            = "../lb_guacamole"
-  name              = "${var.customer_id}_guacamole_lb"
+  name              = "${var.customer_id}-guacamole-lb"
   target_server_ids = [module.desktop_pool_host.server_id]
   network_id        = hcloud_network.net.id
 }
