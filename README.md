@@ -77,3 +77,8 @@ terraform apply -var="customer_id=customerA"
 
 You can also configure a remote backend (e.g. S3 or Terraform Cloud) and use a
 different state path per workspace for better scalability.
+
+## Deleting a workspace
+
+To remove all resources for a customer you can use the `destroy.yml` workflow. Trigger it manually in GitHub Actions and provide the Terraform workspace name and the associated `customer_id`. The workflow requires the Hetzner API token stored as the `HCLOUD_TOKEN` secret.
+
