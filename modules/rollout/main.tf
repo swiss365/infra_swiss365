@@ -58,7 +58,7 @@ module "workspace_host" {
 module "desktop_pool_host" {
   source       = "../server_common"
   name         = "${var.customer_id}_desktop_pool"
-  server_type  = "ax102"
+  server_type  = "ccx63"
   image        = var.image
   network_id   = hcloud_network.net.id
   ssh_key_name = var.ssh_key_name
