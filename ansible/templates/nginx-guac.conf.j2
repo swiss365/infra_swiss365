@@ -3,9 +3,21 @@ upstream guacamole {
 }
 
 server {
+    listen 80;
+    server_name {{ guac_domain | default('_') }};
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
     listen 443 ssl;
-    ssl_certificate     /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+    server_name {{ guac_domain | default('_') }};
+    ssl_certificate     /etc/letsencrypt/live/{{ guac_domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ guac_domain }}/privkey.pem;
 
     location / {
         proxy_pass http://guacamole/;

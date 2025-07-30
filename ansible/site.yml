@@ -46,11 +46,23 @@
         name: nginx
         state: present
         update_cache: yes
+    - name: Install Certbot for Let's Encrypt
+      apt:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: yes
     - name: Deploy Guacamole load balancer config
       template:
         src: nginx-guac.conf.j2
         dest: /etc/nginx/conf.d/guac.conf
       notify: Reload nginx
+    - name: Obtain Let's Encrypt certificate
+      command: >-
+        certbot --nginx -n --redirect --agree-tos
+        --email {{ letsencrypt_email }} -d {{ guac_domain }}
+      when: guac_domain is defined and letsencrypt_email is defined
   handlers:
     - name: Reload nginx
       service:

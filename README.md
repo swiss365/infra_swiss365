@@ -13,6 +13,8 @@ provisioned with a single module call.
 5. Finally run `terraform apply` to provision the virtual machines and load balancer.
    A firewall is created automatically and attached to all servers based on a
    common `customer` label.
+   The rules open ports **22**, **80** and **443** so Let's Encrypt can
+   retrieve certificates for the Guacamole site.
 
 Example usage:
 
@@ -116,8 +118,8 @@ role:
 - **control** – installs Docker for Proxmox/Docker management
 - **workspace** – installs Wine for application hosting
 - **desktop_pool** – installs `xrdp` for virtual desktop access
-- **guac_lb** – installs Nginx and deploys a simple reverse proxy configuration
-  for the Guacamole load balancer
+- **guac_lb** – installs Nginx, obtains a Let's Encrypt certificate and deploys
+  a reverse proxy configuration for the Guacamole load balancer
 
 Run the playbook from the `ansible` directory using the same SSH key that was
 uploaded to Hetzner Cloud:
