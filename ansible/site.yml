@@ -1,5 +1,44 @@
 ---
-- hosts: all
+- hosts: control
+  become: yes
+  tasks:
+    - name: Install Docker
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+        state: present
+        update_cache: yes
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+- hosts: workspace
+  become: yes
+  tasks:
+    - name: Install Wine
+      apt:
+        name: wine
+        state: present
+        update_cache: yes
+
+- hosts: desktop_pool
+  become: yes
+  tasks:
+    - name: Install xrdp
+      apt:
+        name: xrdp
+        state: present
+        update_cache: yes
+    - name: Ensure xrdp is running
+      service:
+        name: xrdp
+        state: started
+        enabled: yes
+
+- hosts: guac_lb
   become: yes
   tasks:
     - name: Install Nginx
@@ -7,8 +46,13 @@
         name: nginx
         state: present
         update_cache: yes
-    - name: Ensure Nginx is running
+    - name: Deploy Guacamole load balancer config
+      template:
+        src: nginx-guac.conf.j2
+        dest: /etc/nginx/conf.d/guac.conf
+      notify: Reload nginx
+  handlers:
+    - name: Reload nginx
       service:
         name: nginx
-        state: started
-        enabled: yes
+        state: reloaded

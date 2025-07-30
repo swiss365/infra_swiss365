@@ -1,8 +1,18 @@
 all:
-  hosts:
+  children:
     control:
-      ansible_host: 65.108.54.239
+      hosts:
+        control:
+          ansible_host: 65.108.54.239
     workspace:
-      ansible_host: 135.181.82.35
+      hosts:
+        workspace:
+          ansible_host: 135.181.82.35
     desktop_pool:
-      ansible_host: 46.62.135.73
+      hosts:
+        desktop_pool:
+          ansible_host: 46.62.135.73
+    guac_lb:
+      hosts:
+        guac_lb:
+          ansible_host: 203.0.113.10
