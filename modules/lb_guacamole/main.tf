@@ -24,9 +24,8 @@ resource "hcloud_load_balancer" "lb" {
   labels             = var.labels
 }
 
-resource "hcloud_certificate" "cert" {
+resource "hcloud_managed_certificate" "cert" {
   name         = "${var.name}-cert"
-  type         = "managed"
   domain_names = [var.domain_name]
 }
 
@@ -55,7 +54,9 @@ resource "hcloud_load_balancer_service" "https" {
   protocol         = "https"
   listen_port      = 443
   destination_port = 8080
-  certificate_id   = hcloud_certificate.cert.id
+  http {
+    certificates = [hcloud_managed_certificate.cert.id]
+  }
 }
 
 output "ipv4" {
