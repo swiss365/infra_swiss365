@@ -1,5 +1,7 @@
 # Example variables for infra_swiss365
 customer_id  = "customerA"
 ssh_key_name = "swiss365_ssh"
+# Domain used for the public Guacamole endpoint
+guacamole_domain = "guac.example.com"
 # image = "ubuntu-24.04"        # optional: override default image
 # network_cidr = "10.20.0.0/16"  # optional

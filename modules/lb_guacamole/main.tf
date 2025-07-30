@@ -11,6 +11,7 @@ variable "target_server_ids" {
   type = list(number)
 }
 variable "network_id" {}
+variable "domain_name" {}
 variable "labels" {
   type    = map(string)
   default = {}
@@ -21,6 +22,12 @@ resource "hcloud_load_balancer" "lb" {
   load_balancer_type = "lb11"
   location           = "fsn1"
   labels             = var.labels
+}
+
+resource "hcloud_certificate" "cert" {
+  name         = "${var.name}-cert"
+  type         = "managed"
+  domain_names = [var.domain_name]
 }
 
 resource "hcloud_load_balancer_network" "net" {
@@ -34,6 +41,21 @@ resource "hcloud_load_balancer_target" "targets" {
   type             = "server"
   load_balancer_id = hcloud_load_balancer.lb.id
   server_id        = var.target_server_ids[count.index]
+}
+
+resource "hcloud_load_balancer_service" "http" {
+  load_balancer_id = hcloud_load_balancer.lb.id
+  protocol         = "http"
+  listen_port      = 80
+  destination_port = 8080
+}
+
+resource "hcloud_load_balancer_service" "https" {
+  load_balancer_id = hcloud_load_balancer.lb.id
+  protocol         = "https"
+  listen_port      = 443
+  destination_port = 8080
+  certificate_id   = hcloud_certificate.cert.id
 }
 
 output "ipv4" {

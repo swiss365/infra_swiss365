@@ -26,6 +26,11 @@ variable "network_cidr" {
   type = string
 }
 
+variable "domain_name" {
+  description = "Domain name used for the Guacamole endpoint"
+  type        = string
+}
+
 # Network
 resource "hcloud_network" "net" {
   name     = "${var.customer_id}-network"
@@ -128,6 +133,7 @@ module "guac_lb" {
   name              = "${var.customer_id}-guacamole-lb"
   target_server_ids = [module.desktop_pool_host.server_id]
   network_id        = hcloud_network.net.id
+  domain_name       = var.domain_name
   labels = {
     customer = var.customer_id
   }
