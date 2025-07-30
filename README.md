@@ -35,6 +35,7 @@ note its name (default: `swiss365_ssh`). Reference this name via the
 ```hcl
 customer_id  = "customerA"
 ssh_key_name = "swiss365_ssh"       # name of the key uploaded at Hetzner
+guacamole_domain = "guac.example.com"  # domain for the public endpoint
 ```
 You can copy `terraform.tfvars.example` as a starting point for your own
 variables file.
@@ -85,9 +86,10 @@ ssh -i /path/to/private_key root@$(terraform output -raw workspace_public_ip)
 ssh -i /path/to/private_key root@$(terraform output -raw desktop_pool_public_ip)
 ```
 
-The load balancer listens on port 443 at the address from `guac_lb_ip`. A minimal
-cloud-init script installs basic utilities, while the provided Ansible playbook
-performs the role-specific setup across all hosts.
+The load balancer listens on port 443 at the address from `guac_lb_ip` and
+automatically provisions a Let's Encrypt certificate for `guacamole_domain`.
+A minimal cloud-init script installs basic utilities, while the provided
+Ansible playbook performs the role-specific setup across all hosts.
 
 ## Multi-customer usage
 
@@ -116,8 +118,6 @@ role:
 - **control** – installs Docker for Proxmox/Docker management
 - **workspace** – installs Wine for application hosting
 - **desktop_pool** – installs `xrdp` for virtual desktop access
-- **guac_lb** – installs Nginx and deploys a simple reverse proxy configuration
-  for the Guacamole load balancer
 
 Run the playbook from the `ansible` directory using the same SSH key that was
 uploaded to Hetzner Cloud:

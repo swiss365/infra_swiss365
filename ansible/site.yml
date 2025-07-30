@@ -38,21 +38,3 @@
         state: started
         enabled: yes
 
-- hosts: guac_lb
-  become: yes
-  tasks:
-    - name: Install Nginx
-      apt:
-        name: nginx
-        state: present
-        update_cache: yes
-    - name: Deploy Guacamole load balancer config
-      template:
-        src: nginx-guac.conf.j2
-        dest: /etc/nginx/conf.d/guac.conf
-      notify: Reload nginx
-  handlers:
-    - name: Reload nginx
-      service:
-        name: nginx
-        state: reloaded

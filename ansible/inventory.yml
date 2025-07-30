@@ -12,7 +12,3 @@ all:
       hosts:
         desktop_pool:
           ansible_host: 46.62.135.73
-    guac_lb:
-      hosts:
-        guac_lb:
-          ansible_host: 203.0.113.10
