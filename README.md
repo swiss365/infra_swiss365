@@ -64,6 +64,15 @@ To provision the entire Swiss365 stack in one step you can use the
 After applying the module the outputs provide the public IP addresses of the
 servers and the load balancer.
 
+Random root passwords are generated automatically for all VMs. You can
+retrieve them from the Terraform outputs after `apply`:
+
+```bash
+terraform output control_root_password
+terraform output workspace_root_password
+terraform output desktop_pool_root_password
+```
+
 ## Connecting to the servers
 
 Retrieve the IP addresses with `terraform output` and connect via SSH using the
