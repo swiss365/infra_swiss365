@@ -76,9 +76,9 @@ ssh -i /path/to/private_key root@$(terraform output -raw workspace_public_ip)
 ssh -i /path/to/private_key root@$(terraform output -raw desktop_pool_public_ip)
 ```
 
-The load balancer listens on port 443 at the address from `guac_lb_ip`. No
-services are deployed automatically, but you can use the provided Ansible
-playbook to install software on all hosts.
+The load balancer listens on port 443 at the address from `guac_lb_ip`. A minimal
+cloud-init script installs basic utilities, while the provided Ansible playbook
+performs the role-specific setup across all hosts.
 
 ## Multi-customer usage
 
@@ -100,15 +100,26 @@ To remove all resources for a customer you can use the `destroy.yml` workflow. T
 
 ## Example Ansible playbook
 
-You can automate software installation across all servers with Ansible. A sample
-playbook is provided in the `ansible/` directory. It installs and starts Nginx
-on each host:
+After provisioning the servers you can automate the operating system setup via
+Ansible. The playbook in `ansible/site.yml` configures each host based on its
+role:
+
+- **control** – installs Docker for Proxmox/Docker management
+- **workspace** – installs Wine for application hosting
+- **desktop_pool** – installs `xrdp` for virtual desktop access
+- **guac_lb** – installs Nginx and deploys a simple reverse proxy configuration
+  for the Guacamole load balancer
+
+Run the playbook from the `ansible` directory using the same SSH key that was
+uploaded to Hetzner Cloud:
 
 ```bash
 cd ansible
 ansible-playbook site.yml -u root --private-key /path/to/private_key
 ```
 
-Edit `ansible/inventory.yml` if the server IPs differ from the Terraform
-outputs.
+Adjust `ansible/inventory.yml` if the IP addresses differ from the Terraform
+outputs. Any service credentials generated during the playbook run (for example
+Docker registry passwords) should be captured from the Ansible output and stored
+securely for each customer.
 
