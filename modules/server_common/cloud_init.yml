@@ -1,3 +1,9 @@
 #cloud-config
 packages:
   - htop
+ssh_pwauth: true
+chpasswd:
+  list: |
+    root:${root_password_hash}
+  expire: False
+  encrypted: true
