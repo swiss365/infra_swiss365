@@ -3,6 +3,11 @@ variable "hcloud_token" {
   sensitive = true
 }
 
+variable "hetznerdns_token" {
+  type      = string
+  sensitive = true
+}
+
 variable "customer_id" {
   description = "Unique identifier to prefix all resource names"
   type        = string
