@@ -36,11 +36,11 @@ note its name (default: `swiss365_ssh`). Reference this name via the
 customer_id  = "customerA"
 ssh_key_name = "swiss365_ssh"       # name of the key uploaded at Hetzner
 # The domain must exist in a DNS zone managed by Hetzner.
-guacamole_domain = "customerA.swiss365.cloud"
+guacamole_domain = "${customer_id}.swiss365.cloud"
 ```
 You can copy `terraform.tfvars.example` as a starting point for your own
 variables file. The Guacamole domain usually follows the pattern
-`<customer_id>.swiss365.cloud`. Ensure this zone exists in Hetzner DNS so that
+`<customer_id>.swiss365.cloud`. Ensure that this zone exists in Hetzner DNS so
 the managed certificate can be issued.
 
 Terraform does not need the private key. Instead, store the private key on the
