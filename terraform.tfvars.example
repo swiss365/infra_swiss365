@@ -8,4 +8,3 @@ guacamole_domain = "<customer_id>.swiss365.cloud"
 hetznerdns_token = "<your-dns-token>"
 # image = "ubuntu-24.04"        # optional: override default image
 # network_cidr = "10.20.0.0/16"  # optional
-
