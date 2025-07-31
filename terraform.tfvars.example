@@ -3,6 +3,6 @@ customer_id  = "customerA"
 ssh_key_name = "swiss365_ssh"
 # Domain used for the public Guacamole endpoint
 # Typically "<customer_id>.swiss365.cloud" and must exist in Hetzner DNS
-guacamole_domain = "customerA.swiss365.cloud"
+guacamole_domain = "<customer_id>.swiss365.cloud"
 # image = "ubuntu-24.04"        # optional: override default image
 # network_cidr = "10.20.0.0/16"  # optional
