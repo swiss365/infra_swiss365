@@ -24,6 +24,6 @@ variable "network_cidr" {
 }
 
 variable "guacamole_domain" {
-  description = "Domain name used for the Guacamole endpoint"
+  description = "Domain name for the Guacamole endpoint. Typically '<customer_id>.swiss365.cloud' and must exist in Hetzner DNS."
   type        = string
 }
