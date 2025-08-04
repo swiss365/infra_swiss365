@@ -77,6 +77,7 @@ retrieve them from the Terraform outputs after `apply`:
 terraform output control_root_password
 terraform output workspace_root_password
 terraform output desktop_pool_root_password
+terraform output -raw guac_admin_password
 ```
 
 ## Connecting to the servers
@@ -125,11 +126,13 @@ role:
 - **desktop_pool** – installs `xrdp` for virtual desktop access
 
 Run the playbook from the `ansible` directory using the same SSH key that was
-uploaded to Hetzner Cloud:
+uploaded to Hetzner Cloud. Pass the generated credentials as extra vars so
+Guacamole receives the admin password:
 
 ```bash
 cd ansible
-ansible-playbook site.yml -u root --private-key /path/to/private_key
+terraform output -json ansible_extra_vars > extra-vars.json
+ansible-playbook site.yml -u root --private-key /path/to/private_key -e @extra-vars.json
 ```
 
 Adjust `ansible/inventory.yml` if the IP addresses differ from the Terraform

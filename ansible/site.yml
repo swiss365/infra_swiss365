@@ -26,6 +26,8 @@
 
 - hosts: desktop_pool
   become: yes
+  vars:
+    guac_admin_user: admin
   tasks:
     - name: Install xrdp
       apt:
@@ -64,4 +66,3 @@
           args:
             chdir: /opt/guacamole
       tags: guacamole
-
