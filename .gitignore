@@ -1,1 +1,2 @@
 .terraform/
+ansible/group_vars/*_vault.yml

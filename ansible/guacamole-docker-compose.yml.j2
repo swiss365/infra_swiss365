@@ -5,9 +5,9 @@ services:
     restart: unless-stopped
     environment:
       POSTGRESQL_HOSTNAME: db
-      POSTGRESQL_DATABASE: guacamole_db
-      POSTGRESQL_USER: guacamole_user
-      POSTGRESQL_PASSWORD: guacamole_pass
+      POSTGRESQL_DATABASE: {{ guac_db_name }}
+      POSTGRESQL_USER: {{ guac_db_user }}
+      POSTGRESQL_PASSWORD: {{ guac_db_password }}
       GUACD_HOSTNAME: guacd
     ports:
       - "8080:8080"
@@ -21,6 +21,6 @@ services:
     image: postgres:13
     restart: unless-stopped
     environment:
-      POSTGRES_DB: guacamole_db
-      POSTGRES_USER: guacamole_user
-      POSTGRES_PASSWORD: guacamole_pass
+      POSTGRES_DB: {{ guac_db_name }}
+      POSTGRES_USER: {{ guac_db_user }}
+      POSTGRES_PASSWORD: {{ guac_db_password }}
