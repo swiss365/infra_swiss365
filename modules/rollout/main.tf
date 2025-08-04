@@ -161,6 +161,7 @@ resource "null_resource" "ansible" {
   }
 }
 
+
 output "control_public_ip" {
   value = module.control_node.ipv4
 }
@@ -189,6 +190,21 @@ output "workspace_root_password" {
 
 output "desktop_pool_root_password" {
   value     = random_password.desktop_pool_pw.result
+  sensitive = true
+}
+
+output "guac_admin_password" {
+  value     = random_password.guac_admin_pw.result
+  sensitive = true
+}
+
+output "ansible_extra_vars" {
+  value = {
+    control_root_password      = random_password.control_pw.result
+    workspace_root_password    = random_password.workspace_pw.result
+    desktop_pool_root_password = random_password.desktop_pool_pw.result
+    guac_admin_password        = random_password.guac_admin_pw.result
+  }
   sensitive = true
 }
 
