@@ -37,4 +37,29 @@
         name: xrdp
         state: started
         enabled: yes
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+    - name: Deploy nginx configuration
+      template:
+        src: nginx_default.conf.j2
+        dest: /etc/nginx/sites-available/default
+      notify: restart nginx
+    - name: Deploy placeholder index page
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <html><body><h1>Swiss365 Guacamole</h1></body></html>
+    - name: Ensure nginx is running
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
 
