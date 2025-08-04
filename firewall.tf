@@ -25,6 +25,13 @@ resource "hcloud_firewall" "swiss365_fw" {
     source_ips = ["0.0.0.0/0"]
   }
 
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "8080"
+    source_ips = ["10.20.1.200/32"]
+  }
+
   apply_to {
     label_selector = "customer=${var.customer_id}"
   }

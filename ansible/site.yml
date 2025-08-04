@@ -39,44 +39,30 @@
         name: xrdp
         state: started
         enabled: yes
-    - name: Install nginx
-      apt:
-        name: nginx
-        state: present
-        update_cache: yes
-    - name: Deploy nginx configuration
-      template:
-        src: nginx_default.conf.j2
-        dest: /etc/nginx/sites-available/default
-      notify: restart nginx
-    - name: Deploy placeholder index page
-      copy:
-        dest: /var/www/html/index.html
-        content: |
-          <html><body><h1>Swiss365 Guacamole</h1></body></html>
-    - name: Ensure nginx is running
-      service:
-        name: nginx
-        state: started
-        enabled: yes
-    - name: Ensure Guacamole config directory exists
-      file:
-        path: /etc/guacamole
-        state: directory
-        mode: '0755'
-    - name: Configure Guacamole admin user
-      copy:
-        dest: /etc/guacamole/user-mapping.xml
-        content: |
-          <user-mapping>
-            <authorize username="{{ guac_admin_user }}" password="{{ guac_admin_password }}"/>
-          </user-mapping>
-        owner: root
-        group: root
-        mode: '0600'
-  handlers:
-    - name: restart nginx
-      service:
-        name: nginx
-        state: restarted
-
+    - name: Setup Guacamole
+      block:
+        - name: Install Docker
+          apt:
+            name:
+              - docker.io
+              - docker-compose
+            state: present
+            update_cache: yes
+        - name: Ensure Docker service is running
+          service:
+            name: docker
+            state: started
+            enabled: yes
+        - name: Create Guacamole directory
+          file:
+            path: /opt/guacamole
+            state: directory
+        - name: Deploy Guacamole docker-compose
+          template:
+            src: guacamole-docker-compose.yml.j2
+            dest: /opt/guacamole/docker-compose.yml
+        - name: Launch Guacamole stack
+          command: docker-compose up -d
+          args:
+            chdir: /opt/guacamole
+      tags: guacamole
