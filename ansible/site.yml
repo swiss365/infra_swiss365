@@ -26,6 +26,8 @@
 
 - hosts: desktop_pool
   become: yes
+  vars:
+    guac_admin_user: admin
   tasks:
     - name: Install xrdp
       apt:
@@ -57,6 +59,21 @@
         name: nginx
         state: started
         enabled: yes
+    - name: Ensure Guacamole config directory exists
+      file:
+        path: /etc/guacamole
+        state: directory
+        mode: '0755'
+    - name: Configure Guacamole admin user
+      copy:
+        dest: /etc/guacamole/user-mapping.xml
+        content: |
+          <user-mapping>
+            <authorize username="{{ guac_admin_user }}" password="{{ guac_admin_password }}"/>
+          </user-mapping>
+        owner: root
+        group: root
+        mode: '0600'
   handlers:
     - name: restart nginx
       service:
