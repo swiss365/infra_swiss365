@@ -6,6 +6,9 @@ terraform {
     random = {
       source = "hashicorp/random"
     }
+    null = {
+      source = "hashicorp/null"
+    }
   }
 }
 
@@ -136,6 +139,25 @@ module "guac_lb" {
   domain_name       = var.domain_name
   labels = {
     customer = var.customer_id
+  }
+}
+
+# Run Ansible configuration after the infrastructure is created
+resource "null_resource" "ansible" {
+  depends_on = [
+    module.control_node,
+    module.workspace_host,
+    module.desktop_pool_host,
+    module.guac_lb
+  ]
+
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command     = "ansible-playbook ansible/site.yml"
+    working_dir = path.root
   }
 }
 
