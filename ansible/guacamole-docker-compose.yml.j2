@@ -1,0 +1,26 @@
+version: '3'
+services:
+  guacamole:
+    image: guacamole/guacamole
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_HOSTNAME: db
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER: guacamole_user
+      POSTGRESQL_PASSWORD: guacamole_pass
+      GUACD_HOSTNAME: guacd
+    ports:
+      - "8080:8080"
+    depends_on:
+      - guacd
+      - db
+  guacd:
+    image: guacamole/guacd
+    restart: unless-stopped
+  db:
+    image: postgres:13
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guacamole_db
+      POSTGRES_USER: guacamole_user
+      POSTGRES_PASSWORD: guacamole_pass
