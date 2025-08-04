@@ -2,11 +2,30 @@
 - hosts: control
   become: yes
   tasks:
-    - name: Install Docker
+    - name: Install prerequisites for Docker
       apt:
         name:
-          - docker.io
-          - docker-compose
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+    - name: Install Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
         state: present
         update_cache: yes
     - name: Ensure Docker service is running
@@ -41,11 +60,30 @@
         enabled: yes
     - name: Setup Guacamole
       block:
-        - name: Install Docker
+        - name: Install prerequisites for Docker
           apt:
             name:
-              - docker.io
-              - docker-compose
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+            state: present
+            update_cache: yes
+        - name: Add Docker GPG key
+          apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+        - name: Add Docker repository
+          apt_repository:
+            repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: present
+        - name: Install Docker Engine
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-compose-plugin
             state: present
             update_cache: yes
         - name: Ensure Docker service is running
@@ -62,7 +100,7 @@
             src: guacamole-docker-compose.yml.j2
             dest: /opt/guacamole/docker-compose.yml
         - name: Launch Guacamole stack
-          command: docker-compose up -d
-          args:
-            chdir: /opt/guacamole
+          community.docker.docker_compose:
+            project_src: /opt/guacamole
+            state: present
       tags: guacamole

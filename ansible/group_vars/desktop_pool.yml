@@ -1,0 +1,5 @@
+---
+guac_db_name: guacamole_db
+guac_db_user: guacamole_user
+guac_db_password: "{{ vault_guac_db_password | default('') }}"
+
