@@ -33,6 +33,16 @@
         name: docker
         state: started
         enabled: yes
+    - name: Install xrdp
+      apt:
+        name: xrdp
+        state: present
+        update_cache: yes
+    - name: Ensure xrdp is running
+      service:
+        name: xrdp
+        state: started
+        enabled: yes
 
 - hosts: workspace
   become: yes
@@ -42,11 +52,21 @@
         name: wine
         state: present
         update_cache: yes
+    - name: Install xrdp
+      apt:
+        name: xrdp
+        state: present
+        update_cache: yes
+    - name: Ensure xrdp is running
+      service:
+        name: xrdp
+        state: started
+        enabled: yes
 
 - hosts: desktop_pool
   become: yes
   vars:
-    guac_admin_user: admin
+    guac_admin_user: guacadmin
   tasks:
     - name: Install xrdp
       apt:
@@ -103,4 +123,49 @@
           community.docker.docker_compose:
             project_src: /opt/guacamole
             state: present
+        - name: Generate Guacamole database schema
+          shell: docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > /opt/guacamole/initdb.sql
+          args:
+            creates: /opt/guacamole/initdb.sql
+        - name: Initialize Guacamole database
+          shell: |
+            set -e
+            docker cp /opt/guacamole/initdb.sql guacamole_db_1:/initdb.sql
+            docker exec guacamole_db_1 psql -U {{ guac_db_user }} -d {{ guac_db_name }} -f /initdb.sql
+          args:
+            creates: /opt/guacamole/.db_initialized
+        - name: Ensure RDP connection exists
+          vars:
+            guac_connections:
+              - { name: "control", host: "{{ hostvars['control'].ansible_host }}", password: "{{ hostvars['control'].guac_rdp_password }}" }
+              - { name: "workspace", host: "{{ hostvars['workspace'].ansible_host }}", password: "{{ hostvars['workspace'].guac_rdp_password }}" }
+              - { name: "desktop", host: "{{ hostvars['desktop_pool'].ansible_host }}", password: "{{ hostvars['desktop_pool'].guac_rdp_password }}" }
+          loop: "{{ guac_connections }}"
+          loop_control:
+            loop_var: conn
+          shell: |
+            docker exec guacamole_db_1 psql -U {{ guac_db_user }} -d {{ guac_db_name }} <<'EOSQL'
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name='{{ conn.name }}') THEN
+                    INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('{{ conn.name }}', 'rdp');
+                    INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+                        VALUES ((SELECT connection_id FROM guacamole_connection WHERE connection_name='{{ conn.name }}'), 'hostname', '{{ conn.host }}');
+                    INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+                        VALUES ((SELECT connection_id FROM guacamole_connection WHERE connection_name='{{ conn.name }}'), 'port', '3389');
+                    INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+                        VALUES ((SELECT connection_id FROM guacamole_connection WHERE connection_name='{{ conn.name }}'), 'username', 'root');
+                    INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+                        VALUES ((SELECT connection_id FROM guacamole_connection WHERE connection_name='{{ conn.name }}'), 'password', '{{ conn.password }}');
+                    INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
+                        VALUES ((SELECT user_id FROM guacamole_user WHERE username='{{ guac_admin_user }}'),
+                                (SELECT connection_id FROM guacamole_connection WHERE connection_name='{{ conn.name }}'),
+                                'READ');
+                END IF;
+            END $$;
+            EOSQL
+        - name: Mark database initialized
+          file:
+            path: /opt/guacamole/.db_initialized
+            state: touch
       tags: guacamole
