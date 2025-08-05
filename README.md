@@ -140,3 +140,16 @@ outputs. Any service credentials generated during the playbook run (for example
 Docker registry passwords) should be captured from the Ansible output and stored
 securely for each customer.
 
+## Helper scripts
+
+The repository includes a small helper to verify the Guacamole Docker stack.
+It checks whether the containers are running on the target host (default
+`desktop_pool`), restarts the stack if necessary and prints the current status.
+
+```bash
+./scripts/check_docker_status.sh [host]
+```
+
+This script can be invoked from monitoring systems or a cron job to restart the
+stack automatically if it stops.
+
