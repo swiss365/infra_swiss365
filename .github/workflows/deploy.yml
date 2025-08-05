@@ -1,0 +1,36 @@
+name: Deploy Hetzner Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      workspace:
+        description: "Terraform workspace to deploy"
+        required: true
+      customer_id:
+        description: "Customer ID prefix for resources"
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Install Ansible and tools
+        run: sudo apt-get update && sudo apt-get install -y ansible jq
+
+      - name: Deploy infrastructure
+        run: ./deploy.sh -var="customer_id=${{ inputs.customer_id }}"
+        env:
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_WORKSPACE: ${{ inputs.workspace }}
+
+      - name: Upload deployment credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-credentials
+          path: deployment_credentials.txt

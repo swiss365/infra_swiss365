@@ -103,4 +103,33 @@
           community.docker.docker_compose:
             project_src: /opt/guacamole
             state: present
+        - name: Generate Guacamole database schema
+          shell: docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > /opt/guacamole/initdb.sql
+          args:
+            creates: /opt/guacamole/initdb.sql
+        - name: Initialize Guacamole database
+          shell: |
+            set -e
+            docker cp /opt/guacamole/initdb.sql guacamole_db_1:/initdb.sql
+            docker exec guacamole_db_1 psql -U {{ guac_db_user }} -d {{ guac_db_name }} -f /initdb.sql
+          args:
+            creates: /opt/guacamole/.db_initialized
+        - name: Ensure RDP connection exists
+          shell: |
+            docker exec guacamole_db_1 psql -U {{ guac_db_user }} -d {{ guac_db_name }} <<'EOSQL'
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name='desktop') THEN
+                    INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('desktop', 'rdp');
+                    INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+                        VALUES ((SELECT connection_id FROM guacamole_connection WHERE connection_name='desktop'), 'hostname', '{{ hostvars['desktop_pool'].ansible_host }}');
+                    INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+                        VALUES ((SELECT connection_id FROM guacamole_connection WHERE connection_name='desktop'), 'port', '3389');
+                END IF;
+            END $$;
+            EOSQL
+        - name: Mark database initialized
+          file:
+            path: /opt/guacamole/.db_initialized
+            state: touch
       tags: guacamole
