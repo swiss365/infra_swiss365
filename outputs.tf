@@ -28,3 +28,16 @@ output "desktop_pool_root_password" {
   value     = random_password.desktop_pool_pw.result
   sensitive = true
 }
+
+output "guacamole_url" {
+  value = "https://${var.guacamole_domain}"
+}
+
+output "guacamole_username" {
+  value = "guacadmin"
+}
+
+output "guacamole_password" {
+  value     = "guacadmin"
+  sensitive = true
+}
