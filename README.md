@@ -153,3 +153,13 @@ It checks whether the containers are running on the target host (default
 This script can be invoked from monitoring systems or a cron job to restart the
 stack automatically if it stops.
 
+For a self-contained monitor that continuously checks and restarts the stack
+every few minutes you can use:
+
+```bash
+./scripts/watch_docker_stack.sh [host] [interval_seconds]
+```
+
+The default interval is 300 seconds (5 minutes). Run this script as a service
+to automatically keep the containers running.
+
