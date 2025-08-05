@@ -55,4 +55,8 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
   cat deployment_credentials.txt >> "$GITHUB_OUTPUT"
 fi
 
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  jq -r 'to_entries[] | "\(.key)=\(.value.value)"' deployment_outputs.json >> "$GITHUB_OUTPUT"
+fi
+
 echo "Deployment credentials saved to deployment_credentials.txt"
