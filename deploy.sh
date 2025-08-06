@@ -26,6 +26,7 @@ all:
           ansible_host: $control_ip
           ansible_user: root
           ansible_password: $control_pw
+          ansible_connection: ssh
           guac_rdp_password: $control_pw
     workspace:
       hosts:
@@ -33,6 +34,7 @@ all:
           ansible_host: $workspace_ip
           ansible_user: root
           ansible_password: $workspace_pw
+          ansible_connection: ssh
           guac_rdp_password: $workspace_pw
     desktop_pool:
       hosts:
@@ -40,6 +42,7 @@ all:
           ansible_host: $desktop_ip
           ansible_user: root
           ansible_password: $desktop_pw
+          ansible_connection: ssh
           guac_rdp_password: $desktop_pw
 EOF
 
