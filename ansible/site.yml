@@ -4,17 +4,13 @@
   connection: ssh
   vars:
     guac_admin_user: guacadmin
+    common_packages:
+      - xrdp
+    common_services:
+      - xrdp
+  roles:
+    - common
   tasks:
-    - name: Install xrdp
-      apt:
-        name: xrdp
-        state: present
-        update_cache: yes
-    - name: Ensure xrdp is running
-      service:
-        name: xrdp
-        state: started
-        enabled: yes
     - name: Setup Guacamole
       block:
         - name: Install prerequisites for Docker
@@ -110,35 +106,23 @@
 - hosts: workspace
   become: yes
   connection: ssh
-  tasks:
-    - name: Install Wine
-      apt:
-        name: wine
-        state: present
-        update_cache: yes
-    - name: Install xrdp
-      apt:
-        name: xrdp
-        state: present
-        update_cache: yes
-    - name: Ensure xrdp is running
-      service:
-        name: xrdp
-        state: started
-        enabled: yes
+  vars:
+    common_packages:
+      - wine
+      - xrdp
+    common_services:
+      - xrdp
+  roles:
+    - common
 
 - hosts: desktop_pool
   become: yes
   connection: ssh
-  tasks:
-    - name: Install xrdp
-      apt:
-        name: xrdp
-        state: present
-        update_cache: yes
-    - name: Ensure xrdp is running
-      service:
-        name: xrdp
-        state: started
-        enabled: yes
+  vars:
+    common_packages:
+      - xrdp
+    common_services:
+      - xrdp
+  roles:
+    - common
 
