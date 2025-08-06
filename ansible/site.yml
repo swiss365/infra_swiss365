@@ -1,70 +1,7 @@
 ---
 - hosts: control
   become: yes
-  tasks:
-    - name: Install prerequisites for Docker
-      apt:
-        name:
-          - ca-certificates
-          - curl
-          - gnupg
-          - lsb-release
-        state: present
-        update_cache: yes
-    - name: Add Docker GPG key
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
-    - name: Add Docker repository
-      apt_repository:
-        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
-        state: present
-    - name: Install Docker Engine
-      apt:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-compose-plugin
-        state: present
-        update_cache: yes
-    - name: Ensure Docker service is running
-      service:
-        name: docker
-        state: started
-        enabled: yes
-    - name: Install xrdp
-      apt:
-        name: xrdp
-        state: present
-        update_cache: yes
-    - name: Ensure xrdp is running
-      service:
-        name: xrdp
-        state: started
-        enabled: yes
-
-- hosts: workspace
-  become: yes
-  tasks:
-    - name: Install Wine
-      apt:
-        name: wine
-        state: present
-        update_cache: yes
-    - name: Install xrdp
-      apt:
-        name: xrdp
-        state: present
-        update_cache: yes
-    - name: Ensure xrdp is running
-      service:
-        name: xrdp
-        state: started
-        enabled: yes
-
-- hosts: desktop_pool
-  become: yes
+  connection: ssh
   vars:
     guac_admin_user: guacadmin
   tasks:
@@ -169,3 +106,39 @@
             path: /opt/guacamole/.db_initialized
             state: touch
       tags: guacamole
+
+- hosts: workspace
+  become: yes
+  connection: ssh
+  tasks:
+    - name: Install Wine
+      apt:
+        name: wine
+        state: present
+        update_cache: yes
+    - name: Install xrdp
+      apt:
+        name: xrdp
+        state: present
+        update_cache: yes
+    - name: Ensure xrdp is running
+      service:
+        name: xrdp
+        state: started
+        enabled: yes
+
+- hosts: desktop_pool
+  become: yes
+  connection: ssh
+  tasks:
+    - name: Install xrdp
+      apt:
+        name: xrdp
+        state: present
+        update_cache: yes
+    - name: Ensure xrdp is running
+      service:
+        name: xrdp
+        state: started
+        enabled: yes
+

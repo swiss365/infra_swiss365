@@ -3,9 +3,12 @@ all:
     control:
       hosts:
         control:
+          ansible_connection: ssh
     workspace:
       hosts:
         workspace:
+          ansible_connection: ssh
     desktop_pool:
       hosts:
         desktop_pool:
+          ansible_connection: ssh
