@@ -46,7 +46,9 @@ all:
           guac_rdp_password: $desktop_pw
 EOF
 
-ansible-playbook ansible/site.yml
+pushd ansible >/dev/null
+ansible-playbook site.yml
+popd >/dev/null
 
 terraform output -json > deployment_outputs.json
 for key in $(jq -r 'keys[]' deployment_outputs.json); do
