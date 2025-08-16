@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure Ansible and required tools are installed
+if ! command -v ansible-playbook >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get update && sudo apt-get install -y ansible jq python3-pip || true
+    else
+      apt-get update && apt-get install -y ansible jq python3-pip || true
+    fi
+  fi
+  if ! command -v ansible-playbook >/dev/null 2>&1; then
+    pip3 install --user ansible jq
+    export PATH="$PATH:$HOME/.local/bin"
+  fi
+  pip3 install --user docker
+  ansible-galaxy collection install community.docker
+fi
+
 terraform init -input=false
 
 if [ -n "${TF_WORKSPACE:-}" ]; then
