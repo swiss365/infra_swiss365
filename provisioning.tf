@@ -18,7 +18,11 @@ resource "null_resource" "configure_servers" {
   provisioner "local-exec" {
     command     = <<EOT
 if ! command -v ansible-playbook >/dev/null 2>&1; then
-  sudo apt-get update && sudo apt-get install -y ansible jq python3-pip
+  if command -v sudo >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y ansible jq python3-pip
+  else
+    apt-get update && apt-get install -y ansible jq python3-pip
+  fi
   pip3 install docker
   ansible-galaxy collection install community.docker
 fi
