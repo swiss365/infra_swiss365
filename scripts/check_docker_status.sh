@@ -11,7 +11,7 @@ check_containers() {
 }
 
 restart_stack() {
-  ansible -i "$INVENTORY" "$HOST" -m community.docker.docker_compose -a "project_src=/opt/guacamole state=restarted"
+  ansible -i "$INVENTORY" "$HOST" -m community.docker.docker_compose_v2 -a "project_src=/opt/guacamole state=restarted"
 }
 
 # Restart the stack if no Guacamole containers are found

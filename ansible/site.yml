@@ -53,7 +53,7 @@
             src: guacamole-docker-compose.yml.j2
             dest: /opt/guacamole/docker-compose.yml
         - name: Launch Guacamole stack
-          community.docker.docker_compose:
+          community.docker.docker_compose_v2:
             project_src: /opt/guacamole
             state: present
         - name: Generate Guacamole database schema
