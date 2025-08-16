@@ -12,6 +12,7 @@ if ! command -v ansible-playbook >/dev/null 2>&1; then
   ansible-galaxy collection install community.docker
 fi
 
+
 terraform init -input=false
 
 if [ -n "${TF_WORKSPACE:-}" ]; then
