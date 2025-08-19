@@ -20,9 +20,9 @@ resource "null_resource" "configure_servers" {
 if ! command -v ansible-playbook >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     if command -v sudo >/dev/null 2>&1; then
-      sudo apt-get update && sudo apt-get install -y ansible jq python3-pip || true
+      sudo apt-get update && sudo apt-get install -y ansible jq python3-pip sshpass || true
     else
-      apt-get update && apt-get install -y ansible jq python3-pip || true
+      apt-get update && apt-get install -y ansible jq python3-pip sshpass || true
     fi
   fi
   if ! command -v ansible-playbook >/dev/null 2>&1; then
@@ -31,6 +31,19 @@ if ! command -v ansible-playbook >/dev/null 2>&1; then
   fi
   pip3 install --user docker
   ansible-galaxy collection install community.docker
+fi
+# Ensure sshpass is available for password-based SSH connections
+if ! command -v sshpass >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get update && sudo apt-get install -y sshpass || true
+    else
+      apt-get update && apt-get install -y sshpass || true
+    fi
+  else
+    pip3 install --user sshpass || true
+    export PATH="$PATH:$HOME/.local/bin"
+  fi
 fi
 cat > ansible/inventory.yml <<'EOF_INVENTORY'
 all:
