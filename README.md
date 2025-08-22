@@ -163,3 +163,36 @@ every few minutes you can use:
 The default interval is 300 seconds (5 minutes). Run this script as a service
 to automatically keep the containers running.
 
+## Environment and repository checks
+
+Verify your local setup and repository before running the automation with these commands:
+
+```bash
+git --version
+git status
+git remote -v
+git log --oneline -n 5
+git branch
+git fetch origin
+git pull origin <branch>
+
+terraform --version
+ansible --version
+
+python --version
+pip --version
+pip list
+pip install -r requirements.txt
+
+node --version
+npm --version
+npm install
+npm test
+
+# run project tests and linters if configured
+pytest
+flake8 .
+black .
+```
+
+These checks help detect missing tools or configuration issues before deployment.
