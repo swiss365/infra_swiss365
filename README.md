@@ -163,6 +163,19 @@ every few minutes you can use:
 The default interval is 300 seconds (5 minutes). Run this script as a service
 to automatically keep the containers running.
 
+## Installing required tools
+
+Before running the Terraform and Ansible automation, install the local
+dependencies on your Debian or Ubuntu machine:
+
+```bash
+./scripts/install_tools.sh
+```
+
+The script adds the HashiCorp APT repository if necessary and installs
+Terraform, Ansible and helper packages such as `jq` and `sshpass`. On other
+distributions, follow the official installation guides for these tools.
+
 ## Environment and repository checks
 
 Verify your local setup and repository before running the automation with these commands:
