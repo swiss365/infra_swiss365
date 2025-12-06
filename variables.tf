@@ -13,6 +13,12 @@ variable "ssh_key_name" {
   default = "swiss365_ssh"
 }
 
+variable "ssh_private_key" {
+  description = "SSH private key for Ansible authentication (base64 encoded)"
+  type        = string
+  sensitive   = true
+}
+
 variable "image" {
   type    = string
   default = "ubuntu-24.04"
@@ -24,12 +30,6 @@ variable "network_cidr" {
 }
 
 variable "guacamole_domain" {
-  description = "Domain name for the Guacamole endpoint. Typically '<customer_id>.swiss365.cloud'."
+  description = "Domain name for the Guacamole endpoint"
   type        = string
-}
-
-variable "ssh_private_key" {
-  description = "SSH private key for Ansible authentication"
-  type        = string
-  sensitive   = true
 }
