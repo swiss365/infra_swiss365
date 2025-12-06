@@ -14,6 +14,45 @@ module "control_node" {
   labels = {
     customer = var.customer_id
   }
+  extra_cloud_init = <<-EOF
+  - sleep 120
+  - apt-get update
+  - apt-get install -y ansible git
+  - mkdir -p /root/.ssh
+  - echo "${var.ssh_private_key}" | base64 -d > /root/.ssh/id_rsa
+  - chmod 600 /root/.ssh/id_rsa
+  - |
+    cat > /root/inventory.yml <<'INVENTORY'
+    all:
+      children:
+        control:
+          hosts:
+            localhost:
+              ansible_connection: local
+        workspace:
+          hosts:
+            workspace:
+              ansible_host: ${module.workspace_host.ipv4}
+              ansible_user: root
+              ansible_ssh_private_key_file: /root/.ssh/id_rsa
+        desktop_pool:
+          hosts:
+            desktop_pool:
+              ansible_host: ${module.desktop_pool_host.ipv4}
+              ansible_user: root
+              ansible_ssh_private_key_file: /root/.ssh/id_rsa
+    INVENTORY
+  - cd /root && git clone https://github.com/swiss365/infra_swiss365.git
+  - |
+    for host in ${module.workspace_host.ipv4} ${module.desktop_pool_host.ipv4}; do
+      until ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@$$host echo ok 2>/dev/null; do
+        echo "Waiting for $$host..."
+        sleep 10
+      done
+    done
+  - ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i /root/inventory.yml /root/infra_swiss365/ansible/site.yml
+  - touch /root/.provisioning_complete
+  EOF
 }
 
 resource "random_password" "workspace_pw" {
