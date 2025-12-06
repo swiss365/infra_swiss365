@@ -3,11 +3,6 @@ variable "hcloud_token" {
   sensitive = true
 }
 
-variable "hetznerdns_token" {
-  type      = string
-  sensitive = true
-}
-
 variable "customer_id" {
   description = "Unique identifier to prefix all resource names"
   type        = string
@@ -29,6 +24,6 @@ variable "network_cidr" {
 }
 
 variable "guacamole_domain" {
-  description = "Domain name for the Guacamole endpoint. Typically '<customer_id>.swiss365.cloud' and must exist in Hetzner DNS."
+  description = "Domain name for the Guacamole endpoint. Typically '<customer_id>.swiss365.cloud'."
   type        = string
 }
