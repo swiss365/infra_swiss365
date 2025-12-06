@@ -8,7 +8,9 @@ provisioned with a single module call.
 
 1. Install Terraform 1.8 or newer.
 2. Export your Hetzner Cloud API token as `TF_VAR_hcloud_token` (or pass it via `-var hcloud_token=...`).
-3. Run `terraform init` to download providers and modules.
+3. Run `terraform init -upgrade` to download providers and refresh the provider
+   lock file (this also cleans up any previously cached `hetznerdns`
+   dependency).
 4. Execute `terraform plan` to review the resources that will be created.
 5. Finally run `terraform apply` to provision the virtual machines and load balancer.
    A firewall is created automatically and attached to all servers based on a
