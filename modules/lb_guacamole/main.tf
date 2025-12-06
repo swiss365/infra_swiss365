@@ -3,9 +3,6 @@ terraform {
     hcloud = {
       source = "hetznercloud/hcloud"
     }
-    hetznerdns = {
-      source = "timohirt/hetznerdns"
-    }
   }
 }
 
@@ -15,12 +12,6 @@ variable "target_server_ids" {
 }
 variable "network_id" {}
 variable "domain_name" {}
-
-locals {
-  domain_parts = split(".", var.domain_name)
-  zone_name    = join(".", slice(local.domain_parts, 1, length(local.domain_parts)))
-  record_name  = local.domain_parts[0]
-}
 variable "labels" {
   type    = map(string)
   default = {}
@@ -42,18 +33,6 @@ resource "hcloud_load_balancer_network" "net" {
   load_balancer_id = hcloud_load_balancer.lb.id
   network_id       = var.network_id
   ip               = "10.20.1.200"
-}
-
-data "hetznerdns_zone" "this" {
-  name = local.zone_name
-}
-
-resource "hetznerdns_record" "a_record" {
-  zone_id = data.hetznerdns_zone.this.id
-  name    = local.record_name
-  type    = "A"
-  value   = hcloud_load_balancer.lb.ipv4
-  ttl     = 300
 }
 
 resource "hcloud_load_balancer_target" "targets" {
