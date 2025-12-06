@@ -15,6 +15,11 @@ resource "null_resource" "configure_servers" {
     desktop_pw   = random_password.desktop_pool_pw.result
   }
 
+# SSH Key für Ansible bereitstellen
+mkdir -p ~/.ssh
+echo "${var.ssh_private_key}" > ~/.ssh/id_rsa
+chmod 600 ~/.ssh/id_rsa
+
   provisioner "local-exec" {
     command     = <<EOT
 if ! command -v ansible-playbook >/dev/null 2>&1; then
