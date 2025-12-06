@@ -9,10 +9,6 @@ terraform {
       source  = "hashicorp/random"
       version = ">= 3.5"
     }
-    hetznerdns = {
-      source  = "timohirt/hetznerdns"
-      version = ">= 2.4"
-    }
   }
 }
 
