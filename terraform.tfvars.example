@@ -1,6 +1,8 @@
 # Example variables for infra_swiss365
 customer_id  = "customerA"
 ssh_key_name = "swiss365_ssh"
+# Token for Hetzner DNS API (required when existing state contains DNS records)
+# hetznerdns_api_token = ""
 # Domain used for the public Guacamole endpoint
 # Typically "<customer_id>.swiss365.cloud"
 guacamole_domain = "<customer_id>.swiss365.cloud"
