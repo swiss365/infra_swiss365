@@ -27,3 +27,9 @@ variable "guacamole_domain" {
   description = "Domain name for the Guacamole endpoint. Typically '<customer_id>.swiss365.cloud'."
   type        = string
 }
+
+variable "ssh_private_key" {
+  description = "SSH private key for Ansible authentication"
+  type        = string
+  sensitive   = true
+}
