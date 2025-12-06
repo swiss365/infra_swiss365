@@ -16,7 +16,7 @@ resource "null_resource" "configure_servers" {
     command     = <<EOT
 # SSH Key für Ansible bereitstellen
 mkdir -p ~/.ssh
-echo "${var.ssh_private_key}" > ~/.ssh/id_rsa
+echo "${var.ssh_private_key}" | base64 -d > ~/.ssh/id_rsa
 chmod 600 ~/.ssh/id_rsa
 
 if ! command -v ansible-playbook >/dev/null 2>&1; then
