@@ -74,7 +74,7 @@ all:
           guac_rdp_password: ${self.triggers.desktop_pw}
 EOF_INVENTORY
 
-ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook ansible/site.yml
+ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook ansible/site.yml
 EOT
     working_dir = path.root
   }
