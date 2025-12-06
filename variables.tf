@@ -3,12 +3,6 @@ variable "hcloud_token" {
   sensitive = true
 }
 
-variable "hetznerdns_api_token" {
-  description = "API token for managing DNS records via Hetzner DNS"
-  type        = string
-  sensitive   = true
-}
-
 variable "customer_id" {
   description = "Unique identifier to prefix all resource names"
   type        = string
