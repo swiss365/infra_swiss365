@@ -16,6 +16,11 @@ variable "labels" {
   type    = map(string)
   default = {}
 }
+variable "extra_cloud_init" {
+  description = "Additional cloud-init runcmd script"
+  type        = string
+  default     = ""
+}
 
 resource "hcloud_server" "this" {
   name        = var.name
@@ -29,6 +34,7 @@ resource "hcloud_server" "this" {
   labels = var.labels
   user_data = templatefile("${path.module}/cloud_init.yml", {
     root_password_hash = var.root_password_hash
+    extra_cloud_init   = var.extra_cloud_init
   })
 }
 
