@@ -30,4 +30,3 @@ jobs:
         run: terraform destroy -auto-approve -var="customer_id=${{ inputs.customer_id }}"
         env:
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          TF_VAR_hetznerdns_token: ${{ secrets.HETZNERDNS_TOKEN }}
