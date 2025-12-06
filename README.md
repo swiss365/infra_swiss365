@@ -8,10 +8,11 @@ provisioned with a single module call.
 
 1. Install Terraform 1.8 or newer.
 2. Export your Hetzner Cloud API token as `TF_VAR_hcloud_token` (or pass it via `-var hcloud_token=...`).
-3. Export your Hetzner DNS API token as `TF_VAR_hetznerdns_token` so Terraform can manage DNS records.
-4. Run `terraform init` to download providers and modules.
-5. Execute `terraform plan` to review the resources that will be created.
-6. Finally run `terraform apply` to provision the virtual machines and load balancer.
+3. Run `terraform init -upgrade` to download providers and refresh the provider
+   lock file (this also cleans up any previously cached `hetznerdns`
+   dependency).
+4. Execute `terraform plan` to review the resources that will be created.
+5. Finally run `terraform apply` to provision the virtual machines and load balancer.
    A firewall is created automatically and attached to all servers based on a
    common `customer` label.
 
@@ -36,14 +37,12 @@ note its name (default: `swiss365_ssh`). Reference this name via the
 ```hcl
 customer_id  = "customerA"
 ssh_key_name = "swiss365_ssh"       # name of the key uploaded at Hetzner
-# The domain must exist in a DNS zone managed by Hetzner.
 guacamole_domain = "${customer_id}.swiss365.cloud"
-hetznerdns_token = "<your-dns-token>"  # allows Terraform to add the A record
 ```
 You can copy `terraform.tfvars.example` as a starting point for your own
 variables file. The Guacamole domain usually follows the pattern
-`<customer_id>.swiss365.cloud`. Ensure that this zone exists in Hetzner DNS so
-the managed certificate can be issued.
+`<customer_id>.swiss365.cloud`. The DNS A record is created automatically by the
+Edge Function once the load balancer is provisioned.
 
 Terraform does not need the private key. Instead, store the private key on the
 machine that runs Terraform and Ansible. When using Ansible you can point to the
