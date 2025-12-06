@@ -7,3 +7,7 @@ chpasswd:
     root:${root_password_hash}
   expire: False
   encrypted: true
+%{ if extra_cloud_init != "" }
+runcmd:
+${extra_cloud_init}
+%{ endif }
