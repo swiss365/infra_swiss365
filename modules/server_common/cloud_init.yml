@@ -11,9 +11,8 @@ packages:
 ssh_pwauth: true
 chpasswd:
   list: |
-    root:${root_password_hash}
+    root:${root_password}
   expire: False
-  encrypted: true
 
 runcmd:
   # Configure xrdp to use xfce4
