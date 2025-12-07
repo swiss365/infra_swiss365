@@ -1,3 +1,5 @@
+# Server Common Module - Standard server with RDP access
+
 terraform {
   required_providers {
     hcloud = {
@@ -6,20 +8,42 @@ terraform {
   }
 }
 
-variable "name" {}
-variable "server_type" {}
-variable "image" {}
-variable "network_id" {}
-variable "ssh_key_name" {}
-variable "root_password_hash" {}
+variable "name" {
+  description = "Server name"
+  type        = string
+}
+
+variable "server_type" {
+  description = "Hetzner server type"
+  type        = string
+  default     = "cx32"
+}
+
+variable "image" {
+  description = "OS image"
+  type        = string
+  default     = "ubuntu-24.04"
+}
+
+variable "network_id" {
+  description = "Network ID to attach"
+  type        = number
+}
+
+variable "ssh_key_name" {
+  description = "SSH key name in Hetzner"
+  type        = string
+}
+
+variable "root_password" {
+  description = "Root password (plaintext)"
+  type        = string
+  sensitive   = true
+}
+
 variable "labels" {
   type    = map(string)
   default = {}
-}
-variable "extra_cloud_init" {
-  description = "Additional cloud-init runcmd script"
-  type        = string
-  default     = ""
 }
 
 resource "hcloud_server" "this" {
@@ -27,14 +51,16 @@ resource "hcloud_server" "this" {
   server_type = var.server_type
   image       = var.image
   ssh_keys    = [var.ssh_key_name]
+  
   network {
     network_id = var.network_id
     ip         = "auto"
   }
+  
   labels = var.labels
+  
   user_data = templatefile("${path.module}/cloud_init.yml", {
-    root_password_hash = var.root_password_hash
-    extra_cloud_init   = var.extra_cloud_init
+    root_password = var.root_password
   })
 }
 
