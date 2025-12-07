@@ -36,8 +36,8 @@ variable "ssh_key_name" {
   type        = string
 }
 
-variable "root_password_hash" {
-  description = "Hashed root password"
+variable "root_password" {
+  description = "Root password (plaintext)"
   type        = string
   sensitive   = true
 }
@@ -99,7 +99,7 @@ resource "hcloud_server" "this" {
   labels = var.labels
   
   user_data = templatefile("${path.module}/cloud_init.yml", {
-    root_password_hash  = var.root_password_hash
+    root_password       = var.root_password
     guac_db_password    = var.guac_db_password
     guac_admin_password = var.guac_admin_password
     workspace_ip        = var.workspace_ip
