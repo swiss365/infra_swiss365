@@ -15,9 +15,9 @@ variable "name" {
 }
 
 variable "server_type" {
-  description = "Hetzner server type"
+  description = "Hetzner server type (use cx32 or cx42 for ARM, ccx* for dedicated)"
   type        = string
-  default     = "cpx31"
+  default     = "cx32"
 }
 
 variable "image" {
