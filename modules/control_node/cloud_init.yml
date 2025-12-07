@@ -1,7 +1,8 @@
 #cloud-config
+# Control Node cloud-init - Installs Docker and Guacamole stack
+
 packages:
   - htop
-  - ca-certificates
   - curl
   - gnupg
   - lsb-release
@@ -9,13 +10,13 @@ packages:
 ssh_pwauth: true
 chpasswd:
   list: |
-    root:${root_password_hash}
+    root:${root_password}
   expire: False
 
 write_files:
   - path: /opt/guacamole/docker-compose.yml
-    permissions: '0644'
     content: |
+      version: '3.8'
       services:
         guacd:
           image: guacamole/guacd:latest
@@ -23,27 +24,26 @@ write_files:
           restart: always
           networks:
             - guacamole_net
-        
+
         postgres:
           image: postgres:15
-          container_name: guacamole_db
+          container_name: guac_postgres
           restart: always
           environment:
-            POSTGRES_DB: guacamole
             POSTGRES_USER: guacamole
             POSTGRES_PASSWORD: ${guac_db_password}
+            POSTGRES_DB: guacamole
           volumes:
             - postgres_data:/var/lib/postgresql/data
-            - /opt/guacamole/initdb:/docker-entrypoint-initdb.d:ro
+            - /opt/guacamole/initdb:/docker-entrypoint-initdb.d
           networks:
             - guacamole_net
           healthcheck:
             test: ["CMD-SHELL", "pg_isready -U guacamole -d guacamole"]
-            interval: 5s
+            interval: 10s
             timeout: 5s
-            retries: 30
-            start_period: 30s
-        
+            retries: 5
+
         guacamole:
           image: guacamole/guacamole:latest
           container_name: guacamole
@@ -63,66 +63,89 @@ write_files:
               condition: service_started
           networks:
             - guacamole_net
-      
+
       networks:
         guacamole_net:
           driver: bridge
-      
+
       volumes:
         postgres_data:
 
   - path: /opt/guacamole/setup-connections.sql
-    permissions: '0644'
     content: |
-      -- Add RDP connections for workspace and desktop servers
+      -- Add RDP connections for Workspace and Desktop servers
+      -- This runs after the main schema is initialized
+      
+      -- Only add connections if IPs are provided
       DO $$
-      DECLARE
-        admin_entity_id integer;
       BEGIN
-        -- Get admin user entity_id
-        SELECT entity_id INTO admin_entity_id FROM guacamole_user WHERE username = 'guacadmin';
-        
-        -- Create workspace connection if IP is provided
-        %{ if workspace_ip != "" }
-        IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name = 'Workspace') THEN
-          INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('Workspace', 'rdp');
+        -- Add Workspace connection if IP is provided
+        IF '${workspace_ip}' != '' THEN
+          INSERT INTO guacamole_connection (connection_name, protocol)
+          VALUES ('Workspace', 'rdp')
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'hostname', '${workspace_ip}' FROM guacamole_connection WHERE connection_name = 'Workspace';
+          SELECT connection_id, 'hostname', '${workspace_ip}'
+          FROM guacamole_connection WHERE connection_name = 'Workspace'
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'port', '3389' FROM guacamole_connection WHERE connection_name = 'Workspace';
+          SELECT connection_id, 'port', '3389'
+          FROM guacamole_connection WHERE connection_name = 'Workspace'
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'username', 'root' FROM guacamole_connection WHERE connection_name = 'Workspace';
+          SELECT connection_id, 'username', 'root'
+          FROM guacamole_connection WHERE connection_name = 'Workspace'
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'password', '${workspace_password}' FROM guacamole_connection WHERE connection_name = 'Workspace';
-          INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'ignore-cert', 'true' FROM guacamole_connection WHERE connection_name = 'Workspace';
-          INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'security', 'any' FROM guacamole_connection WHERE connection_name = 'Workspace';
+          SELECT connection_id, 'password', '${workspace_password}'
+          FROM guacamole_connection WHERE connection_name = 'Workspace'
+          ON CONFLICT DO NOTHING;
+          
+          -- Grant access to guacadmin
           INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
-            SELECT admin_entity_id, connection_id, 'READ' FROM guacamole_connection WHERE connection_name = 'Workspace';
+          SELECT entity_id, connection_id, 'READ'
+          FROM guacamole_entity, guacamole_connection
+          WHERE guacamole_entity.name = 'guacadmin' AND guacamole_connection.connection_name = 'Workspace'
+          ON CONFLICT DO NOTHING;
         END IF;
-        %{ endif }
         
-        -- Create desktop connection if IP is provided
-        %{ if desktop_ip != "" }
-        IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name = 'Desktop') THEN
-          INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('Desktop', 'rdp');
+        -- Add Desktop connection if IP is provided
+        IF '${desktop_ip}' != '' THEN
+          INSERT INTO guacamole_connection (connection_name, protocol)
+          VALUES ('Desktop', 'rdp')
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'hostname', '${desktop_ip}' FROM guacamole_connection WHERE connection_name = 'Desktop';
+          SELECT connection_id, 'hostname', '${desktop_ip}'
+          FROM guacamole_connection WHERE connection_name = 'Desktop'
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'port', '3389' FROM guacamole_connection WHERE connection_name = 'Desktop';
+          SELECT connection_id, 'port', '3389'
+          FROM guacamole_connection WHERE connection_name = 'Desktop'
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'username', 'root' FROM guacamole_connection WHERE connection_name = 'Desktop';
+          SELECT connection_id, 'username', 'root'
+          FROM guacamole_connection WHERE connection_name = 'Desktop'
+          ON CONFLICT DO NOTHING;
+          
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'password', '${desktop_password}' FROM guacamole_connection WHERE connection_name = 'Desktop';
-          INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'ignore-cert', 'true' FROM guacamole_connection WHERE connection_name = 'Desktop';
-          INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'security', 'any' FROM guacamole_connection WHERE connection_name = 'Desktop';
+          SELECT connection_id, 'password', '${desktop_password}'
+          FROM guacamole_connection WHERE connection_name = 'Desktop'
+          ON CONFLICT DO NOTHING;
+          
+          -- Grant access to guacadmin
           INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
-            SELECT admin_entity_id, connection_id, 'READ' FROM guacamole_connection WHERE connection_name = 'Desktop';
+          SELECT entity_id, connection_id, 'READ'
+          FROM guacamole_entity, guacamole_connection
+          WHERE guacamole_entity.name = 'guacadmin' AND guacamole_connection.connection_name = 'Desktop'
+          ON CONFLICT DO NOTHING;
         END IF;
-        %{ endif }
       END $$;
 
   - path: /opt/guacamole/install.sh
@@ -131,143 +154,68 @@ write_files:
       #!/bin/bash
       set -e
       
-      LOG_FILE="/var/log/guacamole-setup.log"
-      exec > >(tee -a $LOG_FILE) 2>&1
-      
-      echo "=========================================="
       echo "$(date): Starting Guacamole installation..."
-      echo "=========================================="
       
       # Install Docker
-      echo "$(date): Installing Docker..."
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-      echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-      apt-get update
-      apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-      systemctl enable docker
-      systemctl start docker
+      curl -fsSL https://get.docker.com | sh
       
-      echo "$(date): Docker installed successfully"
-      docker --version
-      
-      # Wait for Docker to be ready
-      echo "$(date): Waiting for Docker daemon..."
-      for i in {1..30}; do
-        if docker info > /dev/null 2>&1; then
-          echo "$(date): Docker is ready!"
-          break
-        fi
-        echo "$(date): Waiting for Docker... ($i/30)"
-        sleep 2
-      done
+      # Install Docker Compose
+      apt-get update && apt-get install -y docker-compose-plugin
       
       # Create initdb directory
       mkdir -p /opt/guacamole/initdb
       
-      # Generate Guacamole DB init script BEFORE starting containers
-      echo "$(date): Generating Guacamole database schema..."
-      docker pull guacamole/guacamole:latest
-      docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > /opt/guacamole/initdb/01-schema.sql
-      
-      # Verify schema was generated
-      if [ ! -s /opt/guacamole/initdb/01-schema.sql ]; then
-        echo "$(date): ERROR - Schema file is empty!"
-        exit 1
-      fi
-      
-      echo "$(date): Schema generated successfully ($(wc -l < /opt/guacamole/initdb/01-schema.sql) lines)"
-      
-      # Copy connection setup as separate file (runs after schema)
-      cp /opt/guacamole/setup-connections.sql /opt/guacamole/initdb/02-connections.sql
-      
-      echo "$(date): Database init files prepared:"
-      ls -la /opt/guacamole/initdb/
-      
-      # Pull all images first
+      # Pull images first
       echo "$(date): Pulling Docker images..."
       docker pull guacamole/guacd:latest
+      docker pull guacamole/guacamole:latest
       docker pull postgres:15
       
-      # Start Guacamole stack
-      echo "$(date): Starting Guacamole containers..."
+      # Generate database schema
+      echo "$(date): Generating database schema..."
+      docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > /opt/guacamole/initdb/01-schema.sql
+      
+      # Copy connection setup script
+      cp /opt/guacamole/setup-connections.sql /opt/guacamole/initdb/02-connections.sql
+      
+      # Start the stack
+      echo "$(date): Starting Guacamole stack..."
       cd /opt/guacamole
       docker compose up -d
       
-      # Wait for PostgreSQL to be healthy
-      echo "$(date): Waiting for PostgreSQL to initialize (this may take 1-2 minutes)..."
-      for i in {1..60}; do
-        if docker exec guacamole_db pg_isready -U guacamole -d guacamole 2>/dev/null; then
+      # Wait for PostgreSQL to be ready
+      echo "$(date): Waiting for PostgreSQL..."
+      for i in {1..30}; do
+        if docker exec guac_postgres pg_isready -U guacamole -d guacamole > /dev/null 2>&1; then
           echo "$(date): PostgreSQL is ready!"
           break
         fi
-        
-        # Show postgres logs if taking too long
-        if [ $i -eq 30 ]; then
-          echo "$(date): PostgreSQL still initializing, checking logs..."
-          docker logs guacamole_db 2>&1 | tail -10
-        fi
-        
-        echo "$(date): Waiting for PostgreSQL... ($i/60)"
-        sleep 3
+        sleep 2
       done
       
-      # Wait a bit more for init scripts to complete
-      echo "$(date): Waiting for database init scripts to complete..."
-      sleep 10
+      # Wait for Guacamole to be ready
+      echo "$(date): Waiting for Guacamole..."
+      for i in {1..30}; do
+        if curl -s http://localhost:8080/guacamole/ > /dev/null 2>&1; then
+          echo "$(date): Guacamole is ready!"
+          break
+        fi
+        sleep 2
+      done
       
-      # Verify database tables exist
-      echo "$(date): Verifying database schema..."
-      TABLES=$(docker exec guacamole_db psql -U guacamole -d guacamole -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null | tr -d ' ')
-      echo "$(date): Found $TABLES tables in database"
+      # Verify installation
+      echo "$(date): Verifying installation..."
+      docker ps
       
-      if [ "$TABLES" -lt 10 ]; then
-        echo "$(date): WARNING - Not enough tables found, schema may not have been applied"
-        echo "$(date): Attempting manual schema application..."
-        docker exec -i guacamole_db psql -U guacamole -d guacamole < /opt/guacamole/initdb/01-schema.sql || true
-        sleep 5
-      fi
-      
-      # Check if guacadmin user exists
-      echo "$(date): Checking for guacadmin user..."
-      docker exec guacamole_db psql -U guacamole -d guacamole -c "SELECT username FROM guacamole_user;" 2>&1 || echo "Warning: Could not query users"
-      
-      # Restart Guacamole to ensure it connects properly
-      echo "$(date): Restarting Guacamole container..."
+      # Restart guacamole to ensure connections are loaded
       docker restart guacamole
       sleep 5
       
-      # Wait for Guacamole to be ready
-      echo "$(date): Waiting for Guacamole web interface..."
-      for i in {1..30}; do
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
-        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
-          echo "$(date): Guacamole is responding! (HTTP $HTTP_CODE)"
-          break
-        fi
-        echo "$(date): Waiting for Guacamole... ($i/30, HTTP: $HTTP_CODE)"
-        sleep 5
-      done
-      
-      # Test login endpoint
-      echo "$(date): Testing Guacamole login API..."
-      LOGIN_RESULT=$(curl -s -X POST http://localhost:8080/guacamole/api/tokens -d "username=guacadmin&password=guacadmin" 2>/dev/null || echo "failed")
-      if echo "$LOGIN_RESULT" | grep -q "authToken"; then
-        echo "$(date): ✅ Guacamole login successful!"
-      else
-        echo "$(date): ⚠️ Login test result: $LOGIN_RESULT"
-      fi
-      
-      # Show container status
-      echo "$(date): Container status:"
-      docker ps -a
-      
-      echo "=========================================="
       echo "$(date): Guacamole installation completed!"
-      echo "=========================================="
-      echo "Access Guacamole at http://$(hostname -I | awk '{print $1}'):8080/guacamole/"
+      echo "Access Guacamole at: http://$(hostname -I | awk '{print $1}'):8080/guacamole/"
       echo "Default credentials: guacadmin / guacadmin"
 
 runcmd:
   - mkdir -p /opt/guacamole
   - chmod +x /opt/guacamole/install.sh
-  - /opt/guacamole/install.sh
+  - /opt/guacamole/install.sh >> /var/log/guacamole-install.log 2>&1
