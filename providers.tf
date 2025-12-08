@@ -1,13 +1,16 @@
+# providers.tf - Provider configuration
+
 terraform {
-  required_version = ">= 1.8"
+  required_version = ">= 1.0.0"
+  
   required_providers {
     hcloud = {
       source  = "hetznercloud/hcloud"
-      version = ">= 1.44"
+      version = "~> 1.45"
     }
     random = {
       source  = "hashicorp/random"
-      version = ">= 3.5"
+      version = "~> 3.5"
     }
   }
 }
