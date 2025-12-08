@@ -1,4 +1,5 @@
 # Server Common Module - Standard server with xrdp
+# This module creates standard servers with RDP access
 
 terraform {
   required_providers {
@@ -23,6 +24,12 @@ variable "image" {
   description = "OS image"
   type        = string
   default     = "ubuntu-24.04"
+}
+
+variable "location" {
+  description = "Hetzner datacenter location"
+  type        = string
+  default     = "hel1"
 }
 
 variable "network_id" {
@@ -50,6 +57,7 @@ resource "hcloud_server" "this" {
   name        = var.name
   server_type = var.server_type
   image       = var.image
+  location    = var.location
   ssh_keys    = [var.ssh_key_name]
   
   network {
