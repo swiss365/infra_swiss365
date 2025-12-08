@@ -1,5 +1,4 @@
 # Control Node Module - Deploys Guacamole via Cloud-Init
-# This module creates the control node server with full Guacamole installation
 
 terraform {
   required_providers {
@@ -36,6 +35,7 @@ variable "ssh_key_name" {
   type        = string
 }
 
+# Changed from root_password_hash to root_password (plaintext)
 variable "root_password" {
   description = "Root password (plaintext)"
   type        = string
@@ -115,4 +115,9 @@ output "ipv4" {
 
 output "server_id" {
   value = hcloud_server.this.id
+}
+
+output "root_password" {
+  value     = var.root_password
+  sensitive = true
 }
