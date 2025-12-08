@@ -1,4 +1,4 @@
-# modules/lb_guacamole/main.tf
+# Load Balancer Module for Guacamole
 
 terraform {
   required_providers {
@@ -9,32 +9,30 @@ terraform {
 }
 
 variable "name" {
+  description = "Load balancer name"
   type        = string
-  description = "Name of the load balancer"
 }
 
 variable "target_server_ids" {
+  description = "List of server IDs to target"
   type        = list(number)
-  description = "List of server IDs to add as targets"
 }
 
 variable "network_id" {
+  description = "Network ID to attach"
   type        = number
-  description = "Network ID for the load balancer"
 }
 
 variable "domain_name" {
+  description = "Domain name for the load balancer"
   type        = string
-  description = "Domain name for SSL certificate"
 }
 
 variable "labels" {
-  type        = map(string)
-  default     = {}
-  description = "Labels to apply to resources"
+  type    = map(string)
+  default = {}
 }
 
-# Load Balancer
 resource "hcloud_load_balancer" "this" {
   name               = var.name
   load_balancer_type = "lb11"
@@ -42,32 +40,22 @@ resource "hcloud_load_balancer" "this" {
   labels             = var.labels
 }
 
-# Attach to private network
 resource "hcloud_load_balancer_network" "this" {
   load_balancer_id = hcloud_load_balancer.this.id
   network_id       = var.network_id
-  ip               = "10.20.1.200"
 }
 
-# Add targets with PRIVATE IP
 resource "hcloud_load_balancer_target" "servers" {
   count            = length(var.target_server_ids)
   type             = "server"
   load_balancer_id = hcloud_load_balancer.this.id
   server_id        = var.target_server_ids[count.index]
-  use_private_ip   = true  # WICHTIG: Private IP verwenden!
+  use_private_ip   = true  # CRITICAL: Use private network for communication
   
   depends_on = [hcloud_load_balancer_network.this]
 }
 
-# Managed SSL Certificate
-resource "hcloud_managed_certificate" "this" {
-  name         = "${var.name}-cert"
-  domain_names = [var.domain_name]
-  labels       = var.labels
-}
-
-# HTTP Service (Port 80 -> 8080)
+# HTTP Service (port 80) - redirects to Guacamole
 resource "hcloud_load_balancer_service" "http" {
   load_balancer_id = hcloud_load_balancer.this.id
   protocol         = "http"
@@ -80,23 +68,20 @@ resource "hcloud_load_balancer_service" "http" {
     interval = 15
     timeout  = 10
     retries  = 3
+
     http {
-      path         = "/guacamole/"  # WICHTIG: Korrekter Pfad!
-      status_codes = ["2??", "3??"]
+      path         = "/guacamole/"
+      status_codes = ["200", "302"]
     }
   }
 }
 
-# HTTPS Service (Port 443 -> 8080)
+# HTTPS Service (port 443) - for production with TLS
 resource "hcloud_load_balancer_service" "https" {
   load_balancer_id = hcloud_load_balancer.this.id
   protocol         = "https"
   listen_port      = 443
   destination_port = 8080
-
-  http {
-    certificates = [hcloud_managed_certificate.this.id]
-  }
 
   health_check {
     protocol = "http"
@@ -104,20 +89,19 @@ resource "hcloud_load_balancer_service" "https" {
     interval = 15
     timeout  = 10
     retries  = 3
+
     http {
-      path         = "/guacamole/"  # WICHTIG: Korrekter Pfad!
-      status_codes = ["2??", "3??"]
+      path         = "/guacamole/"
+      status_codes = ["200", "302"]
     }
   }
+
+  # Note: You'll need to add a managed certificate separately
+  # or use hcloud_managed_certificate resource
 }
 
-# Outputs
 output "ipv4" {
   value = hcloud_load_balancer.this.ipv4
-}
-
-output "ipv6" {
-  value = hcloud_load_balancer.this.ipv6
 }
 
 output "id" {
