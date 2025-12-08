@@ -29,7 +29,7 @@ variable "image" {
 variable "location" {
   description = "Hetzner datacenter location"
   type        = string
-  default     = "hel1"
+  default     = "fsn1"
 }
 
 variable "network_id" {
