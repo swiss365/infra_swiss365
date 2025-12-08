@@ -1,35 +1,28 @@
-variable "hcloud_token" {
-  type      = string
-  sensitive = true
-}
+# variables.tf - Input variables for Swiss365 infrastructure
 
 variable "customer_id" {
-  description = "Unique identifier to prefix all resource names"
+  description = "Unique customer identifier"
   type        = string
-}
-
-variable "ssh_key_name" {
-  type    = string
-  default = "swiss365_ssh"
-}
-
-variable "ssh_private_key" {
-  description = "SSH private key for Ansible authentication (base64 encoded)"
-  type        = string
-  sensitive   = true
 }
 
 variable "image" {
-  type    = string
-  default = "ubuntu-24.04"
+  description = "OS image for servers"
+  type        = string
+  default     = "ubuntu-24.04"
 }
 
-variable "network_cidr" {
-  type    = string
-  default = "10.20.0.0/16"
+variable "ssh_key_name" {
+  description = "Name of SSH key in Hetzner Cloud"
+  type        = string
 }
 
 variable "guacamole_domain" {
-  description = "Domain name for the Guacamole endpoint"
+  description = "Domain for Guacamole access (e.g., customer.swiss365.cloud)"
   type        = string
+}
+
+variable "hcloud_token" {
+  description = "Hetzner Cloud API token"
+  type        = string
+  sensitive   = true
 }
