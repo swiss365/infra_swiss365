@@ -1,4 +1,4 @@
-# Server Common Module - Standard server with RDP access
+# Server Common Module - Standard server with xrdp
 
 terraform {
   required_providers {
@@ -16,7 +16,7 @@ variable "name" {
 variable "server_type" {
   description = "Hetzner server type"
   type        = string
-  default     = "cx32"
+  default     = "cpx31"
 }
 
 variable "image" {
@@ -35,6 +35,7 @@ variable "ssh_key_name" {
   type        = string
 }
 
+# Changed from root_password_hash to root_password (plaintext)
 variable "root_password" {
   description = "Root password (plaintext)"
   type        = string
@@ -70,4 +71,9 @@ output "ipv4" {
 
 output "server_id" {
   value = hcloud_server.this.id
+}
+
+output "root_password" {
+  value     = var.root_password
+  sensitive = true
 }
