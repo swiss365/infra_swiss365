@@ -14,7 +14,7 @@ variable "name" {
 }
 
 variable "server_type" {
-  description = "Hetzner server type (use cx32 or cx42 for ARM, ccx* for dedicated)"
+  description = "Hetzner server type"
   type        = string
   default     = "cx32"
 }
@@ -35,7 +35,6 @@ variable "ssh_key_name" {
   type        = string
 }
 
-# Changed from root_password_hash to root_password (plaintext)
 variable "root_password" {
   description = "Root password (plaintext)"
   type        = string
@@ -93,7 +92,6 @@ resource "hcloud_server" "this" {
   
   network {
     network_id = var.network_id
-    ip         = "auto"
   }
   
   labels = var.labels
