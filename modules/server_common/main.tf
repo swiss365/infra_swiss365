@@ -14,9 +14,9 @@ variable "name" {
 }
 
 variable "server_type" {
-  description = "Hetzner server type (cx22, cx32, cx42 for ARM shared)"
+  description = "Hetzner server type"
   type        = string
-  default     = "cx32"  # Changed from cpx31 (deprecated)
+  default     = "cx32"
 }
 
 variable "image" {
