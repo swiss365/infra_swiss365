@@ -1,5 +1,5 @@
 # servers.tf - Server configuration for Swiss365 infrastructure
-# Updated to use non-deprecated server types
+# Using cx32 - universally available at all Hetzner locations
 
 # Random passwords for all servers
 resource "random_password" "control_pw" {
@@ -28,11 +28,10 @@ resource "random_password" "guac_admin_pw" {
 }
 
 # Workspace Host - Standard server for applications
-# Using cx42 (ARM) instead of deprecated cpx51
 module "workspace_host" {
   source        = "./modules/server_common"
   name          = "${var.customer_id}-workspace"
-  server_type   = "cx42"  # Changed from cpx51 (deprecated)
+  server_type   = "cx32"  # Universally available
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
@@ -46,11 +45,10 @@ module "workspace_host" {
 }
 
 # Desktop Pool Host - Standard server for virtual desktops
-# Using cx42 (ARM) instead of deprecated cpx51
 module "desktop_pool_host" {
   source        = "./modules/server_common"
   name          = "${var.customer_id}-desktop-pool"
-  server_type   = "cx42"  # Changed from cpx51 (deprecated)
+  server_type   = "cx32"  # Universally available
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
@@ -64,11 +62,10 @@ module "desktop_pool_host" {
 }
 
 # Control Node - Runs Guacamole
-# Using cx32 (ARM) - already correct
 module "control_node" {
   source        = "./modules/control_node"
   name          = "${var.customer_id}-control"
-  server_type   = "cx32"
+  server_type   = "cx32"  # Universally available
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
