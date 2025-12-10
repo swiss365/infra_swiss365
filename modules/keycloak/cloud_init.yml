@@ -1,0 +1,278 @@
+#cloud-config
+
+users:
+  - name: root
+    lock_passwd: false
+
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: "${root_password}"
+  encrypted: false
+
+ssh_pwauth: true
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker.io
+  - docker-compose
+  - curl
+  - jq
+
+write_files:
+  - path: /opt/keycloak/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      
+      services:
+        postgres:
+          image: postgres:15-alpine
+          restart: always
+          volumes:
+            - postgres_data:/var/lib/postgresql/data
+          environment:
+            POSTGRES_DB: keycloak
+            POSTGRES_USER: keycloak
+            POSTGRES_PASSWORD: ${db_password}
+          networks:
+            - keycloak_net
+          healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U keycloak"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+        keycloak:
+          image: quay.io/keycloak/keycloak:latest
+          restart: always
+          command: start --optimized
+          ports:
+            - "80:8080"
+            - "443:8443"
+          environment:
+            KC_DB: postgres
+            KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+            KC_DB_USERNAME: keycloak
+            KC_DB_PASSWORD: ${db_password}
+            KC_HOSTNAME: ${domain}
+            KC_HOSTNAME_STRICT: "false"
+            KC_PROXY: edge
+            KC_HTTP_ENABLED: "true"
+            KEYCLOAK_ADMIN: admin
+            KEYCLOAK_ADMIN_PASSWORD: ${admin_password}
+          depends_on:
+            postgres:
+              condition: service_healthy
+          networks:
+            - keycloak_net
+
+      volumes:
+        postgres_data:
+
+      networks:
+        keycloak_net:
+
+  - path: /opt/swiss365/agent.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      """Swiss365 Server Agent - Keycloak"""
+      import http.server
+      import json
+      import subprocess
+      import hashlib
+      import hmac
+      import urllib.request
+      import urllib.parse
+
+      AGENT_SECRET = "${admin_password}"
+      KEYCLOAK_URL = "http://localhost:8080"
+      ADMIN_USER = "admin"
+      ADMIN_PASSWORD = "${admin_password}"
+      REALM = "${realm_name}"
+      PORT = 9365
+
+      def get_admin_token():
+          data = urllib.parse.urlencode({
+              'grant_type': 'password',
+              'client_id': 'admin-cli',
+              'username': ADMIN_USER,
+              'password': ADMIN_PASSWORD
+          }).encode()
+          req = urllib.request.Request(
+              f"{KEYCLOAK_URL}/realms/master/protocol/openid-connect/token",
+              data=data,
+              headers={'Content-Type': 'application/x-www-form-urlencoded'}
+          )
+          with urllib.request.urlopen(req) as response:
+              return json.loads(response.read())['access_token']
+
+      class AgentHandler(http.server.BaseHTTPRequestHandler):
+          def verify_signature(self, body):
+              sig = self.headers.get('X-Swiss365-Signature', '')
+              expected = hmac.new(
+                  AGENT_SECRET.encode(),
+                  body,
+                  hashlib.sha256
+              ).hexdigest()
+              return hmac.compare_digest(sig, expected)
+
+          def do_POST(self):
+              content_length = int(self.headers['Content-Length'])
+              body = self.rfile.read(content_length)
+              
+              if not self.verify_signature(body):
+                  self.send_response(403)
+                  self.end_headers()
+                  return
+
+              try:
+                  data = json.loads(body)
+                  action = data.get('action')
+                  
+                  if action == 'status':
+                      result = subprocess.run(
+                          ['docker', 'ps', '--format', 'json'],
+                          capture_output=True, text=True
+                      )
+                      response = {'status': 'ok', 'containers': result.stdout}
+                  
+                  elif action == 'create_user':
+                      token = get_admin_token()
+                      user_data = json.dumps({
+                          'username': data.get('username'),
+                          'email': data.get('email'),
+                          'enabled': True,
+                          'emailVerified': True,
+                          'credentials': [{
+                              'type': 'password',
+                              'value': data.get('password'),
+                              'temporary': False
+                          }]
+                      }).encode()
+                      req = urllib.request.Request(
+                          f"{KEYCLOAK_URL}/admin/realms/{REALM}/users",
+                          data=user_data,
+                          headers={
+                              'Authorization': f'Bearer {token}',
+                              'Content-Type': 'application/json'
+                          },
+                          method='POST'
+                      )
+                      try:
+                          urllib.request.urlopen(req)
+                          response = {'status': 'ok', 'message': 'User created'}
+                      except urllib.error.HTTPError as e:
+                          response = {'status': 'error', 'message': str(e)}
+                  
+                  elif action == 'delete_user':
+                      token = get_admin_token()
+                      # First get user ID
+                      req = urllib.request.Request(
+                          f"{KEYCLOAK_URL}/admin/realms/{REALM}/users?username={data.get('username')}",
+                          headers={'Authorization': f'Bearer {token}'}
+                      )
+                      with urllib.request.urlopen(req) as resp:
+                          users = json.loads(resp.read())
+                          if users:
+                              user_id = users[0]['id']
+                              del_req = urllib.request.Request(
+                                  f"{KEYCLOAK_URL}/admin/realms/{REALM}/users/{user_id}",
+                                  headers={'Authorization': f'Bearer {token}'},
+                                  method='DELETE'
+                              )
+                              urllib.request.urlopen(del_req)
+                              response = {'status': 'ok'}
+                          else:
+                              response = {'status': 'error', 'message': 'User not found'}
+                  
+                  elif action == 'create_realm':
+                      token = get_admin_token()
+                      realm_data = json.dumps({
+                          'realm': data.get('realm_name', REALM),
+                          'enabled': True,
+                          'registrationAllowed': False
+                      }).encode()
+                      req = urllib.request.Request(
+                          f"{KEYCLOAK_URL}/admin/realms",
+                          data=realm_data,
+                          headers={
+                              'Authorization': f'Bearer {token}',
+                              'Content-Type': 'application/json'
+                          },
+                          method='POST'
+                      )
+                      try:
+                          urllib.request.urlopen(req)
+                          response = {'status': 'ok'}
+                      except urllib.error.HTTPError as e:
+                          response = {'status': 'error', 'message': str(e)}
+                  
+                  else:
+                      response = {'status': 'error', 'message': 'Unknown action'}
+
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.end_headers()
+                  self.wfile.write(json.dumps(response).encode())
+              
+              except Exception as e:
+                  self.send_response(500)
+                  self.end_headers()
+                  self.wfile.write(str(e).encode())
+
+          def do_GET(self):
+              if self.path == '/health':
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.end_headers()
+                  self.wfile.write(b'{"status":"healthy","service":"keycloak"}')
+              else:
+                  self.send_response(404)
+                  self.end_headers()
+
+      if __name__ == '__main__':
+          server = http.server.HTTPServer(('0.0.0.0', PORT), AgentHandler)
+          print(f'Swiss365 Keycloak Agent running on port {PORT}')
+          server.serve_forever()
+
+  - path: /etc/systemd/system/swiss365-agent.service
+    content: |
+      [Unit]
+      Description=Swiss365 Server Agent
+      After=network.target docker.service
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3 /opt/swiss365/agent.py
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl enable docker
+  - systemctl start docker
+  - mkdir -p /opt/keycloak /opt/swiss365
+  - cd /opt/keycloak && docker-compose pull
+  - cd /opt/keycloak && docker-compose up -d
+  - systemctl daemon-reload
+  - systemctl enable swiss365-agent
+  - systemctl start swiss365-agent
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 9365/tcp
+  - ufw --force enable
+  # Wait for Keycloak to start and create default realm
+  - sleep 60
+  - |
+    curl -X POST "http://localhost:8080/admin/realms" \
+      -H "Authorization: Bearer $(curl -s -X POST "http://localhost:8080/realms/master/protocol/openid-connect/token" \
+        -d "grant_type=password&client_id=admin-cli&username=admin&password=${admin_password}" | jq -r '.access_token')" \
+      -H "Content-Type: application/json" \
+      -d '{"realm": "${realm_name}", "enabled": true}'

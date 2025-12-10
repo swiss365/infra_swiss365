@@ -1,0 +1,217 @@
+#cloud-config
+
+users:
+  - name: root
+    lock_passwd: false
+
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: "${root_password}"
+  encrypted: false
+
+ssh_pwauth: true
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker.io
+  - docker-compose
+  - curl
+  - jq
+
+write_files:
+  - path: /opt/nextcloud/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      
+      services:
+        db:
+          image: mariadb:10.11
+          restart: always
+          command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+          volumes:
+            - db_data:/var/lib/mysql
+          environment:
+            MYSQL_ROOT_PASSWORD: ${db_password}
+            MYSQL_PASSWORD: ${db_password}
+            MYSQL_DATABASE: nextcloud
+            MYSQL_USER: nextcloud
+          networks:
+            - nextcloud_net
+
+        redis:
+          image: redis:alpine
+          restart: always
+          networks:
+            - nextcloud_net
+
+        nextcloud:
+          image: nextcloud:latest
+          restart: always
+          ports:
+            - "80:80"
+            - "443:443"
+          volumes:
+            - nextcloud_data:/var/www/html
+            - nextcloud_config:/var/www/html/config
+            - nextcloud_apps:/var/www/html/custom_apps
+          environment:
+            MYSQL_HOST: db
+            MYSQL_DATABASE: nextcloud
+            MYSQL_USER: nextcloud
+            MYSQL_PASSWORD: ${db_password}
+            REDIS_HOST: redis
+            NEXTCLOUD_ADMIN_USER: admin
+            NEXTCLOUD_ADMIN_PASSWORD: ${admin_password}
+            NEXTCLOUD_TRUSTED_DOMAINS: ${domain}
+            OVERWRITEPROTOCOL: https
+            OVERWRITEHOST: ${domain}
+          depends_on:
+            - db
+            - redis
+          networks:
+            - nextcloud_net
+
+      volumes:
+        db_data:
+        nextcloud_data:
+        nextcloud_config:
+        nextcloud_apps:
+
+      networks:
+        nextcloud_net:
+
+  - path: /opt/swiss365/agent.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      """Swiss365 Server Agent - Nextcloud"""
+      import http.server
+      import json
+      import subprocess
+      import hashlib
+      import hmac
+
+      AGENT_SECRET = "${admin_password}"
+      PORT = 9365
+
+      class AgentHandler(http.server.BaseHTTPRequestHandler):
+          def verify_signature(self, body):
+              sig = self.headers.get('X-Swiss365-Signature', '')
+              expected = hmac.new(
+                  AGENT_SECRET.encode(),
+                  body,
+                  hashlib.sha256
+              ).hexdigest()
+              return hmac.compare_digest(sig, expected)
+
+          def do_POST(self):
+              content_length = int(self.headers['Content-Length'])
+              body = self.rfile.read(content_length)
+              
+              if not self.verify_signature(body):
+                  self.send_response(403)
+                  self.end_headers()
+                  return
+
+              try:
+                  data = json.loads(body)
+                  action = data.get('action')
+                  
+                  if action == 'status':
+                      result = subprocess.run(
+                          ['docker', 'ps', '--format', 'json'],
+                          capture_output=True, text=True
+                      )
+                      response = {'status': 'ok', 'containers': result.stdout}
+                  
+                  elif action == 'occ':
+                      # Execute Nextcloud OCC command
+                      cmd = data.get('command', 'status')
+                      result = subprocess.run(
+                          ['docker', 'exec', '-u', 'www-data', 'nextcloud_nextcloud_1', 'php', 'occ'] + cmd.split(),
+                          capture_output=True, text=True
+                      )
+                      response = {'status': 'ok', 'output': result.stdout, 'error': result.stderr}
+                  
+                  elif action == 'create_user':
+                      username = data.get('username')
+                      password = data.get('password')
+                      email = data.get('email')
+                      result = subprocess.run(
+                          ['docker', 'exec', '-u', 'www-data', 'nextcloud_nextcloud_1', 'php', 'occ',
+                           'user:add', '--password-from-env', '--email', email, username],
+                          capture_output=True, text=True,
+                          env={'OC_PASS': password}
+                      )
+                      response = {'status': 'ok' if result.returncode == 0 else 'error', 'output': result.stdout}
+                  
+                  elif action == 'delete_user':
+                      username = data.get('username')
+                      result = subprocess.run(
+                          ['docker', 'exec', '-u', 'www-data', 'nextcloud_nextcloud_1', 'php', 'occ',
+                           'user:delete', username],
+                          capture_output=True, text=True
+                      )
+                      response = {'status': 'ok' if result.returncode == 0 else 'error'}
+                  
+                  else:
+                      response = {'status': 'error', 'message': 'Unknown action'}
+
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.end_headers()
+                  self.wfile.write(json.dumps(response).encode())
+              
+              except Exception as e:
+                  self.send_response(500)
+                  self.end_headers()
+                  self.wfile.write(str(e).encode())
+
+          def do_GET(self):
+              if self.path == '/health':
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.end_headers()
+                  self.wfile.write(b'{"status":"healthy","service":"nextcloud"}')
+              else:
+                  self.send_response(404)
+                  self.end_headers()
+
+      if __name__ == '__main__':
+          server = http.server.HTTPServer(('0.0.0.0', PORT), AgentHandler)
+          print(f'Swiss365 Nextcloud Agent running on port {PORT}')
+          server.serve_forever()
+
+  - path: /etc/systemd/system/swiss365-agent.service
+    content: |
+      [Unit]
+      Description=Swiss365 Server Agent
+      After=network.target docker.service
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3 /opt/swiss365/agent.py
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl enable docker
+  - systemctl start docker
+  - mkdir -p /opt/nextcloud /opt/swiss365
+  - cd /opt/nextcloud && docker-compose pull
+  - cd /opt/nextcloud && docker-compose up -d
+  - systemctl daemon-reload
+  - systemctl enable swiss365-agent
+  - systemctl start swiss365-agent
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 9365/tcp
+  - ufw --force enable

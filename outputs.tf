@@ -59,3 +59,80 @@ output "guac_db_password" {
   value       = random_password.guac_db_pw.result
   sensitive   = true
 }
+
+# Service Infrastructure Outputs
+output "mailcow_ip" {
+  description = "Public IP of the Mailcow server"
+  value       = module.mailcow_server.ipv4
+}
+
+output "mailcow_api_url" {
+  description = "Mailcow API URL"
+  value       = module.mailcow_server.api_url
+}
+
+output "mailcow_api_key" {
+  description = "Mailcow API key"
+  value       = module.mailcow_server.api_key
+  sensitive   = true
+}
+
+output "mailcow_root_password" {
+  description = "Root password for Mailcow server"
+  value       = random_password.mailcow_root_pw.result
+  sensitive   = true
+}
+
+output "nextcloud_ip" {
+  description = "Public IP of the Nextcloud server"
+  value       = module.nextcloud_server.ipv4
+}
+
+output "nextcloud_url" {
+  description = "Nextcloud URL"
+  value       = module.nextcloud_server.url
+}
+
+output "nextcloud_admin_password" {
+  description = "Nextcloud admin password"
+  value       = module.nextcloud_server.admin_password
+  sensitive   = true
+}
+
+output "nextcloud_root_password" {
+  description = "Root password for Nextcloud server"
+  value       = random_password.nextcloud_root_pw.result
+  sensitive   = true
+}
+
+output "keycloak_ip" {
+  description = "Public IP of the Keycloak server"
+  value       = module.keycloak_server.ipv4
+}
+
+output "keycloak_url" {
+  description = "Keycloak URL"
+  value       = module.keycloak_server.url
+}
+
+output "keycloak_admin_url" {
+  description = "Keycloak admin URL"
+  value       = module.keycloak_server.admin_url
+}
+
+output "keycloak_admin_password" {
+  description = "Keycloak admin password"
+  value       = module.keycloak_server.admin_password
+  sensitive   = true
+}
+
+output "keycloak_realm" {
+  description = "Default Keycloak realm"
+  value       = module.keycloak_server.realm
+}
+
+output "keycloak_root_password" {
+  description = "Root password for Keycloak server"
+  value       = random_password.keycloak_root_pw.result
+  sensitive   = true
+}
