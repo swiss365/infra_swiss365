@@ -51,3 +51,22 @@ variable "subnet_cidr" {
   type        = string
   default     = "10.0.1.0/24"
 }
+
+# Server Type Variables - Customer configurable
+variable "server_type_control" {
+  description = "Server type for Control Node (Guacamole)"
+  type        = string
+  default     = "cx22"
+}
+
+variable "server_type_workspace" {
+  description = "Server type for Workspace and Desktop Pool servers"
+  type        = string
+  default     = "cx32"
+}
+
+variable "server_type_services" {
+  description = "Server type for service servers (Mailcow, Nextcloud, Keycloak)"
+  type        = string
+  default     = "cx32"
+}

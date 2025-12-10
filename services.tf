@@ -46,8 +46,8 @@ resource "random_password" "keycloak_root_pw" {
 module "mailcow_server" {
   source        = "./modules/mailcow"
   name          = "${var.customer_id}-mail"
-  server_type   = "cx32"
-  location      = "fsn1"
+  server_type   = var.server_type_services
+  location      = var.location
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
@@ -70,8 +70,8 @@ module "mailcow_server" {
 module "nextcloud_server" {
   source        = "./modules/nextcloud"
   name          = "${var.customer_id}-cloud"
-  server_type   = "cx32"
-  location      = "fsn1"
+  server_type   = var.server_type_services
+  location      = var.location
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
@@ -94,8 +94,8 @@ module "nextcloud_server" {
 module "keycloak_server" {
   source        = "./modules/keycloak"
   name          = "${var.customer_id}-auth"
-  server_type   = "cx32"
-  location      = "fsn1"
+  server_type   = var.server_type_services
+  location      = var.location
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name

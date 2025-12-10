@@ -1,5 +1,5 @@
 # servers.tf - Server configuration for Swiss365 infrastructure
-# Using cx32 in fsn1 (Falkenstein) - largest Hetzner datacenter
+# Using configurable server types in fsn1 (Falkenstein)
 
 # Random passwords for all servers
 resource "random_password" "control_pw" {
@@ -31,8 +31,8 @@ resource "random_password" "guac_admin_pw" {
 module "workspace_host" {
   source        = "./modules/server_common"
   name          = "${var.customer_id}-workspace"
-  server_type   = "cx32"
-  location      = "fsn1"
+  server_type   = var.server_type_workspace
+  location      = var.location
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
@@ -50,8 +50,8 @@ module "workspace_host" {
 module "desktop_pool_host" {
   source        = "./modules/server_common"
   name          = "${var.customer_id}-desktop-pool"
-  server_type   = "cx32"
-  location      = "fsn1"
+  server_type   = var.server_type_workspace
+  location      = var.location
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
@@ -69,8 +69,8 @@ module "desktop_pool_host" {
 module "control_node" {
   source        = "./modules/control_node"
   name          = "${var.customer_id}-control"
-  server_type   = "cx32"
-  location      = "fsn1"
+  server_type   = var.server_type_control
+  location      = var.location
   image         = var.image
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
