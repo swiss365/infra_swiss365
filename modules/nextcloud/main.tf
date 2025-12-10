@@ -104,3 +104,8 @@ output "admin_password" {
   value     = var.admin_password
   sensitive = true
 }
+
+output "db_password" {
+  value     = var.db_password
+  sensitive = true
+}
