@@ -172,6 +172,13 @@ write_files:
       
       # Append to log
       echo "$(date -Iseconds) [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> "$LOG_FILE"
+      
+      # Send webhook callback to Supabase Edge Function
+      SERVER_IP=$(hostname -I | awk '{print $1}')
+      curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+        -H "Content-Type: application/json" \
+        -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"control_node\",\"status\":\"$STATUS\",\"step\":\"$STEP\",\"progress\":$PROGRESS,\"details\":\"$DETAILS\"}" \
+        2>/dev/null || true
 
   # Guacamole Docker Compose
   - path: /opt/guacamole/docker-compose.yml

@@ -203,10 +203,33 @@ write_files:
       WantedBy=multi-user.target
 
 runcmd:
+  # Notify installation start
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"nextcloud\",\"status\":\"installing\",\"step\":\"docker\",\"progress\":10,\"details\":\"Starting Docker\"}" 2>/dev/null || true
+
   - systemctl enable docker
   - systemctl start docker
   - mkdir -p /opt/nextcloud /opt/swiss365
+
+  # Notify pulling images
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"nextcloud\",\"status\":\"installing\",\"step\":\"images\",\"progress\":40,\"details\":\"Pulling Docker images\"}" 2>/dev/null || true
+
   - cd /opt/nextcloud && docker-compose pull
+
+  # Notify starting containers
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"nextcloud\",\"status\":\"configuring\",\"step\":\"containers\",\"progress\":70,\"details\":\"Starting containers\"}" 2>/dev/null || true
+
   - cd /opt/nextcloud && docker-compose up -d
   - systemctl daemon-reload
   - systemctl enable swiss365-agent
@@ -215,3 +238,10 @@ runcmd:
   - ufw allow 443/tcp
   - ufw allow 9365/tcp
   - ufw --force enable
+
+  # Notify completion
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"nextcloud\",\"status\":\"ready\",\"step\":\"complete\",\"progress\":100,\"details\":\"Nextcloud installation complete\"}" 2>/dev/null || true

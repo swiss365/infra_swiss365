@@ -170,3 +170,10 @@ write_files:
         > "$STATUS_FILE"
       
       echo "$(date -Iseconds) [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> "$LOG_FILE"
+      
+      # Send webhook callback to Supabase Edge Function
+      SERVER_IP=$(hostname -I | awk '{print $1}')
+      curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+        -H "Content-Type: application/json" \
+        -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"${server_role}\",\"status\":\"$STATUS\",\"step\":\"$STEP\",\"progress\":$PROGRESS,\"details\":\"$DETAILS\"}" \
+        2>/dev/null || true

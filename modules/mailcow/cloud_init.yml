@@ -161,14 +161,44 @@ write_files:
       WantedBy=multi-user.target
 
 runcmd:
+  # Notify installation start
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"mailcow\",\"status\":\"installing\",\"step\":\"docker\",\"progress\":10,\"details\":\"Starting Docker\"}" 2>/dev/null || true
+
   # Enable Docker
   - systemctl enable docker
   - systemctl start docker
 
+  # Notify Mailcow clone start
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"mailcow\",\"status\":\"installing\",\"step\":\"clone\",\"progress\":30,\"details\":\"Cloning Mailcow repository\"}" 2>/dev/null || true
+
   # Clone and setup Mailcow
   - cd /opt && git clone https://github.com/mailcow/mailcow-dockerized.git mailcow-install
   - cp /opt/mailcow/mailcow.conf /opt/mailcow-install/mailcow.conf
+
+  # Notify pulling images
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"mailcow\",\"status\":\"installing\",\"step\":\"images\",\"progress\":50,\"details\":\"Pulling Docker images\"}" 2>/dev/null || true
+
   - cd /opt/mailcow-install && docker-compose pull
+
+  # Notify starting containers
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"mailcow\",\"status\":\"configuring\",\"step\":\"containers\",\"progress\":70,\"details\":\"Starting containers\"}" 2>/dev/null || true
+
   - cd /opt/mailcow-install && docker-compose up -d
 
   # Start Swiss365 Agent
@@ -187,3 +217,10 @@ runcmd:
   - ufw allow 443/tcp   # HTTPS
   - ufw allow 9365/tcp  # Agent
   - ufw --force enable
+
+  # Notify completion
+  - |
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -s -X POST "https://zelbakpcnbdkygzvxtrj.supabase.co/functions/v1/installation-callback" \
+      -H "Content-Type: application/json" \
+      -d "{\"server_ip\":\"$SERVER_IP\",\"server_type\":\"mailcow\",\"status\":\"ready\",\"step\":\"complete\",\"progress\":100,\"details\":\"Mailcow installation complete\"}" 2>/dev/null || true
