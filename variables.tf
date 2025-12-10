@@ -1,18 +1,13 @@
 # variables.tf - Input variables for Swiss365 infrastructure
 
+variable "hcloud_token" {
+  description = "Hetzner Cloud API Token"
+  type        = string
+  sensitive   = true
+}
+
 variable "customer_id" {
-  description = "Unique customer identifier"
-  type        = string
-}
-
-variable "image" {
-  description = "OS image for servers"
-  type        = string
-  default     = "ubuntu-24.04"
-}
-
-variable "ssh_key_name" {
-  description = "Name of SSH key in Hetzner Cloud"
+  description = "Customer identifier (used for naming resources and DNS)"
   type        = string
 }
 
@@ -21,8 +16,38 @@ variable "guacamole_domain" {
   type        = string
 }
 
-variable "hcloud_token" {
-  description = "Hetzner Cloud API token"
+variable "ssh_key_name" {
+  description = "Name of the SSH key in Hetzner Cloud"
   type        = string
-  sensitive   = true
+  default     = "swiss365-key"
+}
+
+variable "image" {
+  description = "OS image for all servers"
+  type        = string
+  default     = "ubuntu-24.04"
+}
+
+variable "location" {
+  description = "Hetzner datacenter location"
+  type        = string
+  default     = "fsn1"
+}
+
+variable "network_zone" {
+  description = "Network zone for the private network"
+  type        = string
+  default     = "eu-central"
+}
+
+variable "network_cidr" {
+  description = "CIDR for the private network"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "subnet_cidr" {
+  description = "CIDR for the subnet"
+  type        = string
+  default     = "10.0.1.0/24"
 }

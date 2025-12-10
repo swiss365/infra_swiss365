@@ -37,6 +37,7 @@ module "workspace_host" {
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
   root_password = random_password.workspace_pw.result
+  server_role   = "workspace"
   labels = {
     customer = var.customer_id
     role     = "workspace"
@@ -55,6 +56,7 @@ module "desktop_pool_host" {
   network_id    = hcloud_network.swiss365_net.id
   ssh_key_name  = var.ssh_key_name
   root_password = random_password.desktop_pool_pw.result
+  server_role   = "desktop"
   labels = {
     customer = var.customer_id
     role     = "desktop"

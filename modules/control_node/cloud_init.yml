@@ -1,10 +1,15 @@
 #cloud-config
+# Control Node - Guacamole Gateway for Swiss365 Linux Hosting Platform
+# Exposes status via HTTP on port 8081 for remote monitoring
+
 packages:
   - htop
   - ca-certificates
   - curl
   - gnupg
   - lsb-release
+  - python3
+  - jq
 
 # Enable SSH password authentication
 ssh_pwauth: true
@@ -15,13 +20,11 @@ chpasswd:
     root:${root_password}
   expire: False
 
-# Explicitly configure SSH for password and root login
 runcmd:
   # Configure SSH for password authentication and root login
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
   - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
   - |
-    # Remove any override configs that might block password auth
     for f in /etc/ssh/sshd_config.d/*.conf; do
       if [ -f "$f" ]; then
         sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' "$f"
@@ -30,26 +33,147 @@ runcmd:
       fi
     done
   - systemctl restart ssh
-  # Create status endpoint for remote monitoring
-  - mkdir -p /var/log/lovable-status
-  - echo '{"status":"initializing","step":"ssh-configured","timestamp":"'$(date -Iseconds)'"}' > /var/log/lovable-status/current.json
-  # Start Guacamole installation
+  
+  # Initialize logging system
+  - mkdir -p /var/log/swiss365
+  - chmod 755 /var/log/swiss365
+  - echo '{"status":"initializing","step":"boot","progress":0,"server_role":"control_node","timestamp":"'$(date -Iseconds)'","logs":[]}' > /var/log/swiss365/status.json
+  
+  # Start HTTP status server (port 8081)
+  - chmod +x /opt/swiss365/status-server.py
+  - nohup python3 /opt/swiss365/status-server.py > /var/log/swiss365/status-server.log 2>&1 &
+  
+  # Create Guacamole directory
   - mkdir -p /opt/guacamole
   - chmod +x /opt/guacamole/install.sh
+  
+  # Start Guacamole installation
   - /opt/guacamole/install.sh
 
 write_files:
-  # Status update script for Lovable monitoring
-  - path: /usr/local/bin/update-status.sh
+  # Swiss365 Status HTTP Server - Exposes logs via HTTP API
+  - path: /opt/swiss365/status-server.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      """Swiss365 Status Server - HTTP API for installation status and logs"""
+      import http.server
+      import json
+      import os
+      import subprocess
+      from datetime import datetime
+      
+      STATUS_FILE = "/var/log/swiss365/status.json"
+      LOG_FILE = "/var/log/swiss365/install.log"
+      PORT = 8081
+      
+      class StatusHandler(http.server.BaseHTTPRequestHandler):
+          def do_GET(self):
+              # CORS headers for Edge Function access
+              self.send_response(200)
+              self.send_header('Content-type', 'application/json')
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.end_headers()
+              
+              response = {
+                  "server_role": "control_node",
+                  "timestamp": datetime.now().isoformat(),
+                  "status": "unknown",
+                  "step": "",
+                  "progress": 0,
+                  "logs": [],
+                  "docker": {},
+                  "system": {}
+              }
+              
+              # Read current status
+              try:
+                  if os.path.exists(STATUS_FILE):
+                      with open(STATUS_FILE, 'r') as f:
+                          status_data = json.load(f)
+                          response.update(status_data)
+              except Exception as e:
+                  response["error"] = str(e)
+              
+              # Read last 100 log lines
+              try:
+                  if os.path.exists(LOG_FILE):
+                      with open(LOG_FILE, 'r') as f:
+                          lines = f.readlines()
+                          response["logs"] = [l.strip() for l in lines[-100:]]
+              except Exception as e:
+                  response["log_error"] = str(e)
+              
+              # Get Docker container status
+              try:
+                  result = subprocess.run(
+                      ["docker", "ps", "-a", "--format", "{{.Names}}|{{.Status}}|{{.Ports}}"],
+                      capture_output=True, text=True, timeout=5
+                  )
+                  containers = {}
+                  for line in result.stdout.strip().split('\n'):
+                      if '|' in line:
+                          parts = line.split('|')
+                          containers[parts[0]] = {"status": parts[1], "ports": parts[2] if len(parts) > 2 else ""}
+                  response["docker"] = containers
+              except Exception as e:
+                  response["docker_error"] = str(e)
+              
+              # Get system info
+              try:
+                  response["system"] = {
+                      "hostname": subprocess.run(["hostname"], capture_output=True, text=True).stdout.strip(),
+                      "uptime": subprocess.run(["uptime", "-p"], capture_output=True, text=True).stdout.strip(),
+                      "memory": subprocess.run(["free", "-h", "--si"], capture_output=True, text=True).stdout.strip().split('\n')[1] if subprocess.run(["free", "-h"], capture_output=True).returncode == 0 else ""
+                  }
+              except:
+                  pass
+              
+              self.wfile.write(json.dumps(response, indent=2).encode())
+          
+          def do_OPTIONS(self):
+              self.send_response(200)
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+              self.end_headers()
+          
+          def log_message(self, format, *args):
+              pass  # Suppress default logging
+      
+      if __name__ == "__main__":
+          print(f"Starting Swiss365 Status Server on port {PORT}")
+          server = http.server.HTTPServer(('0.0.0.0', PORT), StatusHandler)
+          server.serve_forever()
+
+  # Status update helper script
+  - path: /usr/local/bin/swiss365-status
     permissions: '0755'
     content: |
       #!/bin/bash
+      # Usage: swiss365-status <status> <step> <progress> [details]
       STATUS="$1"
       STEP="$2"
-      DETAILS="$3"
-      echo "{\"status\":\"$STATUS\",\"step\":\"$STEP\",\"details\":\"$DETAILS\",\"timestamp\":\"$(date -Iseconds)\"}" > /var/log/lovable-status/current.json
-      echo "$(date -Iseconds) [$STATUS] $STEP: $DETAILS" >> /var/log/lovable-status/history.log
+      PROGRESS="$3"
+      DETAILS="$4"
+      
+      STATUS_FILE="/var/log/swiss365/status.json"
+      LOG_FILE="/var/log/swiss365/install.log"
+      
+      # Update status JSON
+      jq -n \
+        --arg status "$STATUS" \
+        --arg step "$STEP" \
+        --argjson progress "$PROGRESS" \
+        --arg details "$DETAILS" \
+        --arg timestamp "$(date -Iseconds)" \
+        --arg role "control_node" \
+        '{status: $status, step: $step, progress: $progress, details: $details, timestamp: $timestamp, server_role: $role}' \
+        > "$STATUS_FILE"
+      
+      # Append to log
+      echo "$(date -Iseconds) [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> "$LOG_FILE"
 
+  # Guacamole Docker Compose
   - path: /opt/guacamole/docker-compose.yml
     permissions: '0644'
     content: |
@@ -108,10 +232,11 @@ write_files:
       volumes:
         postgres_data:
 
+  # RDP Connection Setup SQL
   - path: /opt/guacamole/setup-connections.sql
     permissions: '0644'
     content: |
-      -- Add RDP connections for workspace and desktop servers
+      -- Swiss365 RDP Connections Setup
       DO $$
       DECLARE
         admin_entity_id integer;
@@ -119,64 +244,64 @@ write_files:
         SELECT entity_id INTO admin_entity_id FROM guacamole_user WHERE username = 'guacadmin';
         
         %{ if workspace_ip != "" }
-        IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name = 'Workspace') THEN
-          INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('Workspace', 'rdp');
+        IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name = 'Workspace Server') THEN
+          INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('Workspace Server', 'rdp');
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'hostname', '${workspace_ip}' FROM guacamole_connection WHERE connection_name = 'Workspace';
+            SELECT connection_id, 'hostname', '${workspace_ip}' FROM guacamole_connection WHERE connection_name = 'Workspace Server';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'port', '3389' FROM guacamole_connection WHERE connection_name = 'Workspace';
+            SELECT connection_id, 'port', '3389' FROM guacamole_connection WHERE connection_name = 'Workspace Server';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'username', 'root' FROM guacamole_connection WHERE connection_name = 'Workspace';
+            SELECT connection_id, 'username', 'root' FROM guacamole_connection WHERE connection_name = 'Workspace Server';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'password', '${workspace_password}' FROM guacamole_connection WHERE connection_name = 'Workspace';
+            SELECT connection_id, 'password', '${workspace_password}' FROM guacamole_connection WHERE connection_name = 'Workspace Server';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'ignore-cert', 'true' FROM guacamole_connection WHERE connection_name = 'Workspace';
+            SELECT connection_id, 'ignore-cert', 'true' FROM guacamole_connection WHERE connection_name = 'Workspace Server';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'security', 'any' FROM guacamole_connection WHERE connection_name = 'Workspace';
+            SELECT connection_id, 'security', 'any' FROM guacamole_connection WHERE connection_name = 'Workspace Server';
           INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
-            SELECT admin_entity_id, connection_id, 'READ' FROM guacamole_connection WHERE connection_name = 'Workspace';
+            SELECT admin_entity_id, connection_id, 'READ' FROM guacamole_connection WHERE connection_name = 'Workspace Server';
         END IF;
         %{ endif }
         
         %{ if desktop_ip != "" }
-        IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name = 'Desktop') THEN
-          INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('Desktop', 'rdp');
+        IF NOT EXISTS (SELECT 1 FROM guacamole_connection WHERE connection_name = 'Desktop Pool') THEN
+          INSERT INTO guacamole_connection (connection_name, protocol) VALUES ('Desktop Pool', 'rdp');
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'hostname', '${desktop_ip}' FROM guacamole_connection WHERE connection_name = 'Desktop';
+            SELECT connection_id, 'hostname', '${desktop_ip}' FROM guacamole_connection WHERE connection_name = 'Desktop Pool';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'port', '3389' FROM guacamole_connection WHERE connection_name = 'Desktop';
+            SELECT connection_id, 'port', '3389' FROM guacamole_connection WHERE connection_name = 'Desktop Pool';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'username', 'root' FROM guacamole_connection WHERE connection_name = 'Desktop';
+            SELECT connection_id, 'username', 'root' FROM guacamole_connection WHERE connection_name = 'Desktop Pool';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'password', '${desktop_password}' FROM guacamole_connection WHERE connection_name = 'Desktop';
+            SELECT connection_id, 'password', '${desktop_password}' FROM guacamole_connection WHERE connection_name = 'Desktop Pool';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'ignore-cert', 'true' FROM guacamole_connection WHERE connection_name = 'Desktop';
+            SELECT connection_id, 'ignore-cert', 'true' FROM guacamole_connection WHERE connection_name = 'Desktop Pool';
           INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-            SELECT connection_id, 'security', 'any' FROM guacamole_connection WHERE connection_name = 'Desktop';
+            SELECT connection_id, 'security', 'any' FROM guacamole_connection WHERE connection_name = 'Desktop Pool';
           INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
-            SELECT admin_entity_id, connection_id, 'READ' FROM guacamole_connection WHERE connection_name = 'Desktop';
+            SELECT admin_entity_id, connection_id, 'READ' FROM guacamole_connection WHERE connection_name = 'Desktop Pool';
         END IF;
         %{ endif }
       END $$;
 
+  # Guacamole Installation Script with detailed logging
   - path: /opt/guacamole/install.sh
     permissions: '0755'
     content: |
       #!/bin/bash
       set -e
       
-      LOG_FILE="/var/log/guacamole-setup.log"
+      LOG_FILE="/var/log/swiss365/install.log"
       exec > >(tee -a $LOG_FILE) 2>&1
       
-      update_status() {
-        /usr/local/bin/update-status.sh "$1" "$2" "$3"
-      }
-      
       echo "=========================================="
-      echo "$(date): Starting Guacamole installation..."
+      echo "$(date): Swiss365 Control Node Installation"
       echo "=========================================="
-      update_status "installing" "docker" "Installing Docker"
       
+      swiss365-status "installing" "docker" 10 "Installing Docker Engine"
+      
+      # Install Docker
+      echo "$(date): Installing Docker..."
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
       echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
       apt-get update
@@ -184,80 +309,106 @@ write_files:
       systemctl enable docker
       systemctl start docker
       
-      docker --version
-      update_status "installing" "docker" "Docker installed"
+      echo "$(date): Docker installed: $(docker --version)"
+      swiss365-status "installing" "docker" 20 "Docker installed successfully"
       
+      # Wait for Docker
+      echo "$(date): Waiting for Docker daemon..."
       for i in {1..30}; do
         if docker info > /dev/null 2>&1; then
+          echo "$(date): Docker is ready!"
           break
         fi
         sleep 2
       done
       
+      # Generate Guacamole schema
       mkdir -p /opt/guacamole/initdb
-      update_status "installing" "schema" "Generating database schema"
+      swiss365-status "installing" "schema" 30 "Generating database schema"
       
+      echo "$(date): Pulling Guacamole image and generating schema..."
       docker pull guacamole/guacamole:latest
       docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > /opt/guacamole/initdb/01-schema.sql
       
       if [ ! -s /opt/guacamole/initdb/01-schema.sql ]; then
-        update_status "error" "schema" "Schema file is empty"
+        echo "$(date): ERROR - Schema file is empty!"
+        swiss365-status "error" "schema" 30 "Schema generation failed"
         exit 1
       fi
       
-      update_status "installing" "schema" "Schema generated"
+      echo "$(date): Schema generated ($(wc -l < /opt/guacamole/initdb/01-schema.sql) lines)"
+      swiss365-status "installing" "schema" 40 "Schema generated"
+      
+      # Copy connection setup
       cp /opt/guacamole/setup-connections.sql /opt/guacamole/initdb/02-connections.sql
       
-      update_status "installing" "images" "Pulling Docker images"
+      # Pull remaining images
+      echo "$(date): Pulling Docker images..."
+      swiss365-status "installing" "images" 50 "Pulling Docker images"
       docker pull guacamole/guacd:latest
       docker pull postgres:15
       
-      update_status "installing" "containers" "Starting containers"
+      # Start containers
+      echo "$(date): Starting Guacamole stack..."
+      swiss365-status "installing" "containers" 60 "Starting containers"
       cd /opt/guacamole
       docker compose up -d
       
-      update_status "installing" "postgres" "Waiting for PostgreSQL"
+      # Wait for PostgreSQL
+      echo "$(date): Waiting for PostgreSQL..."
+      swiss365-status "installing" "postgres" 70 "Waiting for PostgreSQL"
       for i in {1..60}; do
         if docker exec guacamole_db pg_isready -U guacamole -d guacamole 2>/dev/null; then
+          echo "$(date): PostgreSQL is ready!"
           break
         fi
         sleep 3
       done
       
-      sleep 10
+      sleep 10  # Wait for init scripts
       
-      update_status "installing" "verify-db" "Verifying database schema"
+      # Verify database
+      swiss365-status "installing" "verify" 80 "Verifying database"
       TABLES=$(docker exec guacamole_db psql -U guacamole -d guacamole -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null | tr -d ' ')
+      echo "$(date): Found $TABLES tables"
       
       if [ "$TABLES" -lt 10 ]; then
+        echo "$(date): Applying schema manually..."
         docker exec -i guacamole_db psql -U guacamole -d guacamole < /opt/guacamole/initdb/01-schema.sql || true
         sleep 5
       fi
       
-      docker exec guacamole_db psql -U guacamole -d guacamole -c "SELECT username FROM guacamole_user;" 2>&1 || true
-      
-      update_status "installing" "restart" "Restarting Guacamole"
+      # Restart Guacamole
       docker restart guacamole
       sleep 5
       
-      update_status "installing" "web-check" "Checking web interface"
+      # Wait for web interface
+      swiss365-status "installing" "web" 90 "Waiting for web interface"
       for i in {1..30}; do
         HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
         if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+          echo "$(date): Guacamole responding (HTTP $HTTP_CODE)"
           break
         fi
         sleep 5
       done
       
-      update_status "installing" "login-test" "Testing login"
+      # Test login
+      swiss365-status "installing" "login" 95 "Testing login"
       LOGIN_RESULT=$(curl -s -X POST http://localhost:8080/guacamole/api/tokens -d "username=guacadmin&password=guacadmin" 2>/dev/null || echo "failed")
+      
       if echo "$LOGIN_RESULT" | grep -q "authToken"; then
-        update_status "ready" "complete" "Guacamole is ready"
+        echo "$(date): ✅ Guacamole login successful!"
+        swiss365-status "ready" "complete" 100 "Installation complete - Guacamole ready"
       else
-        update_status "error" "login-failed" "$LOGIN_RESULT"
+        echo "$(date): ⚠️ Login test failed: $LOGIN_RESULT"
+        swiss365-status "warning" "login-issue" 95 "Guacamole running but login test failed"
       fi
       
+      # Final status
+      echo "$(date): Container status:"
       docker ps -a
+      
       echo "=========================================="
-      echo "$(date): Guacamole installation completed!"
+      echo "$(date): Installation completed!"
       echo "=========================================="

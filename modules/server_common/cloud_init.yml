@@ -1,5 +1,6 @@
 #cloud-config
-# Standard server cloud-init - installs basic packages and xrdp for RDP access
+# Swiss365 Standard Server - Workspace/Desktop with xrdp
+# Exposes status via HTTP on port 8081 for remote monitoring
 
 packages:
   - htop
@@ -7,6 +8,8 @@ packages:
   - xfce4
   - xfce4-goodies
   - dbus-x11
+  - python3
+  - jq
 
 # Enable SSH password authentication
 ssh_pwauth: true
@@ -22,7 +25,6 @@ runcmd:
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
   - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
   - |
-    # Remove any override configs that might block password auth
     for f in /etc/ssh/sshd_config.d/*.conf; do
       if [ -f "$f" ]; then
         sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' "$f"
@@ -31,15 +33,140 @@ runcmd:
       fi
     done
   - systemctl restart ssh
-  # Create status endpoint for remote monitoring
-  - mkdir -p /var/log/lovable-status
-  - echo '{"status":"initializing","step":"ssh-configured","timestamp":"'$(date -Iseconds)'"}' > /var/log/lovable-status/current.json
+  
+  # Initialize logging system
+  - mkdir -p /var/log/swiss365
+  - mkdir -p /opt/swiss365
+  - chmod 755 /var/log/swiss365
+  - echo '{"status":"initializing","step":"boot","progress":0,"server_role":"${server_role}","timestamp":"'$(date -Iseconds)'"}' > /var/log/swiss365/status.json
+  
+  # Start HTTP status server (port 8081)
+  - chmod +x /opt/swiss365/status-server.py
+  - nohup python3 /opt/swiss365/status-server.py > /var/log/swiss365/status-server.log 2>&1 &
+  
   # Configure xrdp to use xfce4
   - echo "xfce4-session" > /root/.xsession
   - chmod +x /root/.xsession
+  
   # Enable and start xrdp
   - systemctl enable xrdp
   - systemctl start xrdp
-  # Final status
-  - echo '{"status":"ready","step":"xrdp-running","timestamp":"'$(date -Iseconds)'"}' > /var/log/lovable-status/current.json
-  - echo "$(date): Server setup completed" > /var/log/cloud-init-complete.log
+  
+  # Update status
+  - /usr/local/bin/swiss365-status "ready" "xrdp" 100 "Server ready with xrdp"
+  
+  # Final log
+  - echo "$(date): Swiss365 server setup completed" >> /var/log/swiss365/install.log
+
+write_files:
+  # Swiss365 Status HTTP Server - Exposes logs via HTTP API
+  - path: /opt/swiss365/status-server.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      """Swiss365 Status Server - HTTP API for server status and logs"""
+      import http.server
+      import json
+      import os
+      import subprocess
+      from datetime import datetime
+      
+      STATUS_FILE = "/var/log/swiss365/status.json"
+      LOG_FILE = "/var/log/swiss365/install.log"
+      PORT = 8081
+      
+      class StatusHandler(http.server.BaseHTTPRequestHandler):
+          def do_GET(self):
+              self.send_response(200)
+              self.send_header('Content-type', 'application/json')
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.end_headers()
+              
+              response = {
+                  "server_role": "${server_role}",
+                  "timestamp": datetime.now().isoformat(),
+                  "status": "unknown",
+                  "step": "",
+                  "progress": 0,
+                  "logs": [],
+                  "services": {},
+                  "system": {}
+              }
+              
+              # Read current status
+              try:
+                  if os.path.exists(STATUS_FILE):
+                      with open(STATUS_FILE, 'r') as f:
+                          status_data = json.load(f)
+                          response.update(status_data)
+              except Exception as e:
+                  response["error"] = str(e)
+              
+              # Read last 100 log lines
+              try:
+                  if os.path.exists(LOG_FILE):
+                      with open(LOG_FILE, 'r') as f:
+                          lines = f.readlines()
+                          response["logs"] = [l.strip() for l in lines[-100:]]
+              except Exception as e:
+                  response["log_error"] = str(e)
+              
+              # Check xrdp status
+              try:
+                  result = subprocess.run(
+                      ["systemctl", "is-active", "xrdp"],
+                      capture_output=True, text=True, timeout=5
+                  )
+                  response["services"]["xrdp"] = result.stdout.strip()
+              except:
+                  response["services"]["xrdp"] = "unknown"
+              
+              # Get system info
+              try:
+                  response["system"] = {
+                      "hostname": subprocess.run(["hostname"], capture_output=True, text=True).stdout.strip(),
+                      "uptime": subprocess.run(["uptime", "-p"], capture_output=True, text=True).stdout.strip(),
+                  }
+              except:
+                  pass
+              
+              self.wfile.write(json.dumps(response, indent=2).encode())
+          
+          def do_OPTIONS(self):
+              self.send_response(200)
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+              self.end_headers()
+          
+          def log_message(self, format, *args):
+              pass
+      
+      if __name__ == "__main__":
+          print(f"Starting Swiss365 Status Server on port {PORT}")
+          server = http.server.HTTPServer(('0.0.0.0', PORT), StatusHandler)
+          server.serve_forever()
+
+  # Status update helper script
+  - path: /usr/local/bin/swiss365-status
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      STATUS="$1"
+      STEP="$2"
+      PROGRESS="$3"
+      DETAILS="$4"
+      
+      STATUS_FILE="/var/log/swiss365/status.json"
+      LOG_FILE="/var/log/swiss365/install.log"
+      
+      jq -n \
+        --arg status "$STATUS" \
+        --arg step "$STEP" \
+        --argjson progress "$PROGRESS" \
+        --arg details "$DETAILS" \
+        --arg timestamp "$(date -Iseconds)" \
+        --arg role "${server_role}" \
+        '{status: $status, step: $step, progress: $progress, details: $details, timestamp: $timestamp, server_role: $role}' \
+        > "$STATUS_FILE"
+      
+      echo "$(date -Iseconds) [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> "$LOG_FILE"

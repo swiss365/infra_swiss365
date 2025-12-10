@@ -1,10 +1,19 @@
-# Example variables for infra_swiss365
-customer_id  = "customerA"
-ssh_key_name = "swiss365_ssh"
-# Token for Hetzner DNS API (required when existing state contains DNS records)
-# hetznerdns_api_token = ""
-# Domain used for the public Guacamole endpoint
-# Typically "<customer_id>.swiss365.cloud"
-guacamole_domain = "<customer_id>.swiss365.cloud"
-# image = "ubuntu-24.04"        # optional: override default image
-# network_cidr = "10.20.0.0/16"  # optional
+# terraform.tfvars.example
+# Copy to terraform.tfvars and fill in your values
+# Note: Sensitive values should be set via environment variables or Terraform Cloud
+
+# Customer identifier - used for resource naming and DNS
+customer_id = "example-customer"
+
+# Domain for Guacamole access
+guacamole_domain = "example-customer.swiss365.cloud"
+
+# SSH key name in Hetzner Cloud
+ssh_key_name = "swiss365-key"
+
+# Hetzner Cloud API Token (sensitive - use TF_VAR_hcloud_token instead)
+# hcloud_token = "your-token-here"
+
+# Optional: Override defaults
+# image    = "ubuntu-24.04"
+# location = "fsn1"

@@ -1,5 +1,6 @@
 # Server Common Module - Standard server with xrdp
 # This module creates standard servers with RDP access
+# All servers use cx32 server type and fsn1 location
 
 terraform {
   required_providers {
@@ -53,6 +54,12 @@ variable "labels" {
   default = {}
 }
 
+variable "server_role" {
+  description = "Role of this server (workspace, desktop, etc.)"
+  type        = string
+  default     = "standard"
+}
+
 resource "hcloud_server" "this" {
   name        = var.name
   server_type = var.server_type
@@ -68,6 +75,7 @@ resource "hcloud_server" "this" {
   
   user_data = templatefile("${path.module}/cloud_init.yml", {
     root_password = var.root_password
+    server_role   = var.server_role
   })
 }
 

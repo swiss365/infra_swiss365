@@ -1,20 +1,9 @@
 # providers.tf - Provider configuration
-
-terraform {
-  required_version = ">= 1.0.0"
-  
-  required_providers {
-    hcloud = {
-      source  = "hetznercloud/hcloud"
-      version = "~> 1.45"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.5"
-    }
-  }
-}
+# NOTE: DNS is managed via Supabase Edge Function (hetzner-dns-manager)
+# The hetznerdns provider is NOT used as it's incompatible with Hetzner Cloud DNS
 
 provider "hcloud" {
   token = var.hcloud_token
 }
+
+provider "random" {}

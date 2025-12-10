@@ -1,209 +1,158 @@
-# infra_swiss365
+# Swiss365 Terraform Infrastructure
 
-This repository contains a sample Terraform configuration for deploying servers
-and a load balancer on Hetzner Cloud. It demonstrates how to use Terraform
-modules for common server configuration and load balancer setup. The new
-`modules/rollout` module bundles these pieces so the entire stack can be
-provisioned with a single module call.
+Vollständige Terraform-Konfiguration für das Swiss365 MSP-Infrastrukturmanagement.
 
-1. Install Terraform 1.8 or newer.
-2. Export your Hetzner Cloud API token as `TF_VAR_hcloud_token` (or pass it via `-var hcloud_token=...`).
-3. Run `terraform init -upgrade` to download providers and refresh the provider
-   lock file.
-4. Execute `terraform plan` to review the resources that will be created.
-5. Finally run `terraform apply` to provision the virtual machines and load balancer.
-   A firewall is created automatically and attached to all servers based on a
-   common `customer` label.
+## Dateistruktur
 
-Example usage:
+```
+infra_swiss365/
+├── versions.tf          # Terraform & Provider Versionen
+├── providers.tf         # Provider Konfiguration (hcloud, random)
+├── variables.tf         # Input Variablen
+├── network.tf           # Private Netzwerk & Subnet
+├── servers.tf           # Server Module (Control, Workspace, Desktop)
+├── load_balancer.tf     # Load Balancer Konfiguration
+├── outputs.tf           # Terraform Outputs
+└── modules/
+    ├── control_node/
+    │   ├── main.tf          # Control Node Server
+    │   └── cloud_init.yml   # Guacamole Installation
+    ├── server_common/
+    │   ├── main.tf          # Standard Server
+    │   └── cloud_init.yml   # xrdp/xfce4 Installation
+    └── lb_guacamole/
+        └── main.tf          # Load Balancer für Guacamole
+```
+
+## Wichtige Hinweise
+
+### 1. DNS-Management
+DNS wird **NICHT** über Terraform verwaltet! Die DNS-Records werden automatisch über die Supabase Edge Function `hetzner-dns-manager` erstellt, nachdem das Terraform Apply erfolgreich war.
+
+### 2. Server-Typen
+Alle Server verwenden standardmäßig:
+- **Server-Typ:** `cx32` (4 vCPU, 8GB RAM)
+- **Standort:** `fsn1` (Falkenstein - größtes Hetzner Rechenzentrum)
+- **Image:** `ubuntu-24.04`
+
+### 3. Load Balancer
+- Health Check Pfad: `/guacamole/`
+- Verwendet **private IP** für Backend-Kommunikation
+- HTTPS mit automatischem Zertifikat
+
+## Installation
 
 ```bash
-export TF_VAR_hcloud_token=<your-token>
-terraform apply -var="customer_id=customerA"
+# 1. Repository klonen
+git clone https://github.com/your-org/infra_swiss365.git
+cd infra_swiss365
+
+# 2. Alle Dateien aus terraform-changes/ kopieren
+cp -r terraform-changes/* .
+
+# 3. Terraform initialisieren
+terraform init
+
+# 4. Plan erstellen
+terraform plan -var="customer_id=testcustomer" -var="guacamole_domain=testcustomer.swiss365.cloud"
+
+# 5. Apply
+terraform apply -var="customer_id=testcustomer" -var="guacamole_domain=testcustomer.swiss365.cloud"
 ```
 
-The `customer_id` variable is required unless you define it in a `.tfvars` file.
-All resources receive a `customer` label derived from this value so the firewall
-rules apply automatically.
+## Terraform Cloud Variablen
 
-## SSH key handling
+Diese Variablen müssen in Terraform Cloud konfiguriert sein:
 
-Terraform expects only the **name** of an SSH key that already exists in your
-Hetzner Cloud project. Upload your public key in the Hetzner Cloud console and
-note its name (default: `swiss365_ssh`). Reference this name via the
-`ssh_key_name` variable. A minimal `terraform.tfvars` could look like:
+| Variable | Typ | Beschreibung |
+|----------|-----|--------------|
+| `hcloud_token` | Environment (TF_VAR_hcloud_token) | Hetzner Cloud API Token |
+| `customer_id` | Terraform | Kunden-Identifier |
+| `guacamole_domain` | Terraform | Domain für Guacamole |
+| `ssh_key_name` | Terraform | SSH-Key Name in Hetzner |
 
-```hcl
-customer_id  = "customerA"
-ssh_key_name = "swiss365_ssh"       # name of the key uploaded at Hetzner
-guacamole_domain = "${customer_id}.swiss365.cloud"
-```
-You can copy `terraform.tfvars.example` as a starting point for your own
-variables file. The Guacamole domain usually follows the pattern
-`<customer_id>.swiss365.cloud`. The DNS A record is created automatically by the
-Edge Function once the load balancer is provisioned.
+## Nach dem Deployment
 
-Terraform does not need the private key. Instead, store the private key on the
-machine that runs Terraform and Ansible. When using Ansible you can point to the
-key with `ANSIBLE_PRIVATE_KEY_FILE` or the `--private-key` CLI option.
-If you run these tools in a CI system such as "lovable", keep the private key as
-a secret variable and provide its path via the environment.
+1. **Warte 5-10 Minuten** bis Cloud-Init abgeschlossen ist
+2. **DNS-Record wird automatisch erstellt** via Edge Function
+3. **Öffne** `https://<customer_id>.swiss365.cloud/guacamole`
+4. **Login:** `guacadmin` / `guacadmin`
+5. **WICHTIG:** Ändere das Passwort nach dem ersten Login!
 
+## Debugging
 
-## Rollout module
-
-To provision the entire Swiss365 stack in one step you can use the
-`modules/rollout` module:
-
-```hcl
- module "rollout" {
-  source       = "./modules/rollout"
-  customer_id  = var.customer_id
-  ssh_key_name = var.ssh_key_name
-  image        = var.image
-  network_cidr = var.network_cidr
-}
-```
-
-After applying the module the outputs provide the public IP addresses of the
-servers and the load balancer.
-
-Random root passwords are generated automatically for all VMs. You can
-retrieve them from the Terraform outputs after `apply`:
-
+### SSH zum Control Node
 ```bash
-terraform output control_root_password
-terraform output workspace_root_password
-terraform output desktop_pool_root_password
-terraform output -raw guac_admin_password
+ssh -i ~/.ssh/swiss365_key root@<control_ip>
 ```
 
-## Connecting to the servers
-
-Retrieve the IP addresses with `terraform output` and connect via SSH using the
-key referenced in `ssh_key_name` (default: `swiss365_ssh`):
-
+### Cloud-Init Logs prüfen
 ```bash
-terraform output
-ssh -i /path/to/private_key root@$(terraform output -raw control_public_ip)
-ssh -i /path/to/private_key root@$(terraform output -raw workspace_public_ip)
-ssh -i /path/to/private_key root@$(terraform output -raw desktop_pool_public_ip)
+cat /var/log/swiss365/install.log
+cat /var/log/cloud-init-output.log
 ```
 
-The load balancer listens on port 443 at the address from `guac_lb_ip` and
-automatically provisions a Let's Encrypt certificate for `guacamole_domain`.
-A minimal cloud-init script installs basic utilities, while the provided
-Ansible playbook performs the role-specific setup across all hosts.
-
-## Multi-customer usage
-
-Use the `customer_id` variable to prefix all resource names. Create a separate
-Terraform workspace for each customer so their state files remain isolated:
-
+### Docker Container prüfen
 ```bash
-terraform workspace new customerA
-terraform workspace select customerA
-terraform apply -var="customer_id=customerA"
+docker ps -a
+docker logs guacamole
+docker logs guacamole_db
 ```
 
-You can also configure a remote backend (e.g. S3 or Terraform Cloud) and use a
-different state path per workspace for better scalability.
-
-## Deleting a workspace
-
-To remove all resources for a customer you can use the `destroy.yml` workflow. Trigger it manually in GitHub Actions and provide the Terraform workspace name and the associated `customer_id`. The workflow requires the Hetzner API token stored as the `HCLOUD_TOKEN` secret.
-
-## Example Ansible playbook
-
-After provisioning the servers you can automate the operating system setup via
-Ansible. The playbook in `ansible/site.yml` configures each host based on its
-role:
-
-- **control** – installs Docker for Proxmox/Docker management
-- **workspace** – installs Wine for application hosting
-- **desktop_pool** – installs `xrdp` for virtual desktop access
-
-Run the playbook from the `ansible` directory using the same SSH key that was
-uploaded to Hetzner Cloud. Pass the generated credentials as extra vars so
-Guacamole receives the admin password:
-
+### Status API abfragen
 ```bash
-cd ansible
-terraform output -json ansible_extra_vars > extra-vars.json
-ansible-playbook site.yml -u root --private-key /path/to/private_key -e @extra-vars.json
+curl http://<control_ip>:8081
 ```
 
-Adjust `ansible/inventory.yml` if the IP addresses differ from the Terraform
-outputs. Any service credentials generated during the playbook run (for example
-Docker registry passwords) should be captured from the Ansible output and stored
-securely for each customer.
+## Module
 
-## Helper scripts
+### control_node
+- Installiert Docker via Cloud-Init
+- Deployed Guacamole mit PostgreSQL
+- Konfiguriert RDP-Verbindungen zu anderen Servern
+- Stellt Status-API auf Port 8081 bereit
 
-The repository includes a small helper to verify the Guacamole Docker stack.
-It checks whether the containers are running on the target host (default
-`desktop_pool`), restarts the stack if necessary and prints the current status.
+### server_common
+- Installiert xrdp und xfce4 Desktop
+- Ermöglicht RDP-Zugang via Guacamole
+- Stellt Status-API auf Port 8081 bereit
 
-```bash
-./scripts/check_docker_status.sh [host]
+### lb_guacamole
+- Load Balancer für Guacamole
+- Health Check auf /guacamole/
+- HTTP (80) und HTTPS (443) auf Port 8080
+
+## Architektur
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Internet                                  │
+│                        │                                     │
+│                        ▼                                     │
+│            ┌─────────────────────┐                          │
+│            │   Load Balancer     │                          │
+│            │ (customer.swiss365) │                          │
+│            └──────────┬──────────┘                          │
+│                       │ :80/:443 → :8080                    │
+│                       ▼                                     │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │                  Private Network                         │ │
+│ │                    10.0.0.0/16                          │ │
+│ │                                                          │ │
+│ │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │ │
+│ │  │ Control Node │  │  Workspace   │  │ Desktop Pool │  │ │
+│ │  │  (Guacamole) │  │   Server     │  │    Server    │  │ │
+│ │  │   :8080      │  │   :3389      │  │    :3389     │  │ │
+│ │  └──────────────┘  └──────────────┘  └──────────────┘  │ │
+│ │         │                  ▲                 ▲          │ │
+│ │         └──────── RDP ─────┴─────────────────┘          │ │
+│ └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-This script can be invoked from monitoring systems or a cron job to restart the
-stack automatically if it stops.
+## Gelöschte Dateien
 
-For a self-contained monitor that continuously checks and restarts the stack
-every few minutes you can use:
+Diese Dateien existieren nicht mehr und sollten entfernt werden falls vorhanden:
 
-```bash
-./scripts/watch_docker_stack.sh [host] [interval_seconds]
-```
-
-The default interval is 300 seconds (5 minutes). Run this script as a service
-to automatically keep the containers running.
-
-## Installing required tools
-
-Before running the Terraform and Ansible automation, install the local
-dependencies on your Debian or Ubuntu machine:
-
-```bash
-./scripts/install_tools.sh
-```
-
-The script adds the HashiCorp APT repository if necessary and installs
-Terraform, Ansible and helper packages such as `jq` and `sshpass`. On other
-distributions, follow the official installation guides for these tools.
-
-## Environment and repository checks
-
-Verify your local setup and repository before running the automation with these commands:
-
-```bash
-git --version
-git status
-git remote -v
-git log --oneline -n 5
-git branch
-git fetch origin
-git pull origin <branch>
-
-terraform --version
-ansible --version
-
-python --version
-pip --version
-pip list
-pip install -r requirements.txt
-
-node --version
-npm --version
-npm install
-npm test
-
-# run project tests and linters if configured
-pytest
-flake8 .
-black .
-```
-
-These checks help detect missing tools or configuration issues before deployment.
+- `provisioning.tf` - Ansible-Provisioning wurde durch Cloud-Init ersetzt
+- Alle `hetznerdns` Provider-Referenzen - DNS via Edge Function
