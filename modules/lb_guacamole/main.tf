@@ -99,33 +99,8 @@ resource "hcloud_load_balancer_service" "http" {
   }
 }
 
-# HTTPS Service (port 443 -> 8080)
-resource "hcloud_load_balancer_service" "https" {
-  load_balancer_id = hcloud_load_balancer.this.id
-  protocol         = "https"
-  listen_port      = 443
-  destination_port = 8080
-
-  health_check {
-    protocol = "http"
-    port     = 8080
-    interval = 15
-    timeout  = 10
-    retries  = 3
-    
-    http {
-      # CRITICAL: Health check path must be /guacamole/
-      path         = "/guacamole/"
-      status_codes = ["200", "302", "301"]
-    }
-  }
-
-  http {
-    sticky_sessions = true
-    cookie_name     = "GUAC_LB"
-    cookie_lifetime = 300
-  }
-}
+# NOTE: HTTPS disabled - requires managed certificate
+# To enable HTTPS, add hcloud_managed_certificate resource first
 
 output "ipv4" {
   description = "Public IPv4 address of the load balancer"
