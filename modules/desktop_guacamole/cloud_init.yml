@@ -66,10 +66,8 @@ write_files:
           container_name: guacamole
           restart: always
           depends_on:
-            postgres:
-              condition: service_healthy
-            guacd:
-              condition: service_started
+            - postgres
+            - guacd
           environment:
             GUACD_HOSTNAME: guacd
             POSTGRES_HOSTNAME: postgres
@@ -267,7 +265,22 @@ runcmd:
   
   # Start Guacamole stack
   - swiss365-callback "installing" "guacamole" 60 "Starting Guacamole containers"
-  - cd /opt/guacamole && docker-compose up -d
+  - cd /opt/guacamole && docker-compose up -d postgres guacd
+  - swiss365-callback "installing" "guacamole" 65 "Waiting for database"
+  
+  # Wait for postgres to be healthy before starting guacamole
+  - |
+    for i in {1..30}; do
+      if docker exec guacamole-postgres pg_isready -U guacamole -d guacamole >/dev/null 2>&1; then
+        echo "PostgreSQL is ready"
+        break
+      fi
+      echo "Waiting for PostgreSQL... ($i/30)"
+      sleep 5
+    done
+  
+  # Now start the guacamole web container
+  - cd /opt/guacamole && docker-compose up -d guacamole
   - swiss365-callback "installing" "guacamole" 70 "Containers starting"
   
   # Wait for Guacamole to be ready
