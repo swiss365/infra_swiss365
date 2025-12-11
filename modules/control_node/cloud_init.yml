@@ -392,7 +392,7 @@ write_files:
       # Wait for web interface
       swiss365-status "installing" "web" 90 "Waiting for web interface"
       for i in {1..30}; do
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
+        HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
         if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
           echo "$(date): Guacamole responding (HTTP $HTTP_CODE)"
           break
