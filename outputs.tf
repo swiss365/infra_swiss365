@@ -1,5 +1,6 @@
 # outputs.tf - Terraform outputs for Swiss365 Shared Infrastructure Model
 # Customer Desktop only - shared services are accessed via API
+# VCS Sync Test: 2025-12-11 - Branch-based trigger verification
 
 # Desktop Server Information
 output "desktop_ip" {
