@@ -1,50 +1,6 @@
 # Shared Infrastructure - Central Multi-Tenant Services
 # Deploy ONCE, serves ALL customers
-
-terraform {
-  required_providers {
-    hcloud = {
-      source  = "hetznercloud/hcloud"
-      version = "~> 1.45"
-    }
-  }
-}
-
-variable "hcloud_token" {
-  description = "Hetzner Cloud API token"
-  type        = string
-  sensitive   = true
-}
-
-variable "ssh_key_name" {
-  description = "SSH key name in Hetzner"
-  type        = string
-  default     = "swiss365-key"
-}
-
-variable "location" {
-  description = "Hetzner datacenter location"
-  type        = string
-  default     = "fsn1"
-}
-
-variable "mailcow_domain" {
-  description = "Domain for central Mailcow"
-  type        = string
-  default     = "mail.swiss365.cloud"
-}
-
-variable "nextcloud_domain" {
-  description = "Domain for central Nextcloud"
-  type        = string
-  default     = "cloud.swiss365.cloud"
-}
-
-variable "keycloak_domain" {
-  description = "Domain for central Keycloak"
-  type        = string
-  default     = "auth.swiss365.cloud"
-}
+# Configuration is in versions.tf and variables.tf
 
 provider "hcloud" {
   token = var.hcloud_token
@@ -90,14 +46,14 @@ resource "hcloud_network" "shared" {
 resource "hcloud_network_subnet" "shared" {
   network_id   = hcloud_network.shared.id
   type         = "cloud"
-  network_zone = "eu-central"
+  network_zone = var.network_zone
   ip_range     = "10.0.1.0/24"
 }
 
 # Central Mailcow Server (Multi-Domain)
 resource "hcloud_server" "mailcow" {
   name        = "central-mailcow"
-  server_type = "cx43"  # 8 vCPU, 16GB RAM for multi-tenant mail
+  server_type = var.server_type_mailcow
   image       = "ubuntu-24.04"
   location    = var.location
   ssh_keys    = [var.ssh_key_name]
@@ -116,6 +72,7 @@ resource "hcloud_server" "mailcow" {
     mailcow_domain   = var.mailcow_domain
     db_password      = random_password.mailcow_db.result
     admin_password   = random_password.mailcow_admin.result
+    callback_url     = var.callback_url
   })
   
   depends_on = [hcloud_network_subnet.shared]
@@ -124,7 +81,7 @@ resource "hcloud_server" "mailcow" {
 # Central Nextcloud Server (Multi-Tenant)
 resource "hcloud_server" "nextcloud" {
   name        = "central-nextcloud"
-  server_type = "cx43"  # 8 vCPU, 16GB RAM for multi-tenant storage
+  server_type = var.server_type_nextcloud
   image       = "ubuntu-24.04"
   location    = var.location
   ssh_keys    = [var.ssh_key_name]
@@ -151,7 +108,7 @@ resource "hcloud_server" "nextcloud" {
 # Central Keycloak Server (Multi-Realm)
 resource "hcloud_server" "keycloak" {
   name        = "central-keycloak"
-  server_type = "cx33"  # 4 vCPU, 8GB RAM for IAM
+  server_type = var.server_type_keycloak
   image       = "ubuntu-24.04"
   location    = var.location
   ssh_keys    = [var.ssh_key_name]
@@ -188,7 +145,7 @@ resource "hcloud_load_balancer_network" "shared" {
   ip               = "10.0.1.2"
 }
 
-# Mailcow target (HTTPS)
+# Load Balancer Targets
 resource "hcloud_load_balancer_target" "mailcow" {
   load_balancer_id = hcloud_load_balancer.shared.id
   type             = "server"
@@ -196,7 +153,6 @@ resource "hcloud_load_balancer_target" "mailcow" {
   use_private_ip   = true
 }
 
-# Nextcloud target
 resource "hcloud_load_balancer_target" "nextcloud" {
   load_balancer_id = hcloud_load_balancer.shared.id
   type             = "server"
@@ -204,10 +160,113 @@ resource "hcloud_load_balancer_target" "nextcloud" {
   use_private_ip   = true
 }
 
-# Keycloak target
 resource "hcloud_load_balancer_target" "keycloak" {
   load_balancer_id = hcloud_load_balancer.shared.id
   type             = "server"
   server_id        = hcloud_server.keycloak.id
   use_private_ip   = true
+}
+
+# Load Balancer Services with Health Checks
+
+# Mailcow HTTPS Service (Port 443 -> 443)
+resource "hcloud_load_balancer_service" "mailcow_https" {
+  load_balancer_id = hcloud_load_balancer.shared.id
+  protocol         = "https"
+  listen_port      = 443
+  destination_port = 443
+
+  http {
+    sticky_sessions = true
+    certificates    = []  # Add SSL cert IDs when available
+  }
+
+  health_check {
+    protocol = "http"
+    port     = 443
+    interval = 15
+    timeout  = 10
+    retries  = 3
+
+    http {
+      domain       = var.mailcow_domain
+      path         = "/api/v1/get/status/version"
+      status_codes = ["200", "401"]  # 401 = API requires auth, but is responding
+    }
+  }
+}
+
+# Nextcloud HTTPS Service (Port 443 -> 443)
+resource "hcloud_load_balancer_service" "nextcloud_https" {
+  load_balancer_id = hcloud_load_balancer.shared.id
+  protocol         = "https"
+  listen_port      = 8443  # Different port to avoid conflict
+  destination_port = 443
+
+  http {
+    sticky_sessions = true
+    certificates    = []
+  }
+
+  health_check {
+    protocol = "http"
+    port     = 443
+    interval = 15
+    timeout  = 10
+    retries  = 3
+
+    http {
+      domain       = var.nextcloud_domain
+      path         = "/status.php"
+      status_codes = ["200"]
+    }
+  }
+}
+
+# Keycloak HTTPS Service (Port 443 -> 8443)
+resource "hcloud_load_balancer_service" "keycloak_https" {
+  load_balancer_id = hcloud_load_balancer.shared.id
+  protocol         = "https"
+  listen_port      = 9443  # Different port to avoid conflict
+  destination_port = 8443
+
+  http {
+    sticky_sessions = true
+    certificates    = []
+  }
+
+  health_check {
+    protocol = "http"
+    port     = 8443
+    interval = 15
+    timeout  = 10
+    retries  = 3
+
+    http {
+      domain       = var.keycloak_domain
+      path         = "/health"
+      status_codes = ["200"]
+    }
+  }
+}
+
+# HTTP to HTTPS redirect services
+resource "hcloud_load_balancer_service" "http_redirect" {
+  load_balancer_id = hcloud_load_balancer.shared.id
+  protocol         = "http"
+  listen_port      = 80
+  destination_port = 80
+
+  health_check {
+    protocol = "http"
+    port     = 80
+    interval = 15
+    timeout  = 10
+    retries  = 3
+
+    http {
+      path         = "/"
+      status_codes = ["200", "301", "302", "404"]
+    }
+  }
 }
