@@ -47,17 +47,6 @@ output "guac_db_password" {
   sensitive   = true
 }
 
-# Network Information
-output "network_id" {
-  description = "Customer network ID"
-  value       = hcloud_network.swiss365_net.id
-}
-
-output "subnet_id" {
-  description = "Customer subnet ID"
-  value       = hcloud_network_subnet.swiss365_subnet.id
-}
-
 # Customer Domain
 output "customer_domain" {
   description = "Customer domain for accessing services"
