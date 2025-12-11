@@ -71,6 +71,13 @@ variable "callback_url" {
   default     = ""
 }
 
+variable "agent_secret" {
+  description = "HMAC secret for agent authentication"
+  type        = string
+  sensitive   = true
+  default     = "swiss365-agent-secret"
+}
+
 variable "labels" {
   type    = map(string)
   default = {}
@@ -98,6 +105,7 @@ resource "hcloud_server" "desktop" {
     guacamole_db_password    = var.guacamole_db_password
     customer_id              = var.customer_id
     callback_url             = var.callback_url
+    agent_secret             = var.agent_secret
   })
 }
 

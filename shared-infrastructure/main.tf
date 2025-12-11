@@ -205,12 +205,12 @@ resource "hcloud_load_balancer_service" "mailcow_https" {
   }
 }
 
-# Nextcloud HTTPS Service (Port 443 -> 443)
+# Nextcloud HTTPS Service (Port 8443 -> 80, Nextcloud nginx listens on 80)
 resource "hcloud_load_balancer_service" "nextcloud_https" {
   load_balancer_id = hcloud_load_balancer.shared.id
   protocol         = "https"
   listen_port      = 8443  # Different port to avoid conflict
-  destination_port = 443
+  destination_port = 80    # Nextcloud nginx listens on port 80
 
   http {
     sticky_sessions = true
@@ -219,7 +219,7 @@ resource "hcloud_load_balancer_service" "nextcloud_https" {
 
   health_check {
     protocol = "http"
-    port     = 443
+    port     = 80           # Health check on port 80 where nginx listens
     interval = 15
     timeout  = 10
     retries  = 3
