@@ -72,7 +72,10 @@ resource "hcloud_server" "mailcow" {
     mailcow_domain   = var.mailcow_domain
     db_password      = random_password.mailcow_db.result
     admin_password   = random_password.mailcow_admin.result
+    api_key          = random_password.mailcow_db.result
     callback_url     = var.callback_url
+    workspace_id     = var.workspace_id
+    agent_secret     = var.agent_secret
   })
   
   depends_on = [hcloud_network_subnet.shared]
@@ -100,6 +103,9 @@ resource "hcloud_server" "nextcloud" {
     nextcloud_domain = var.nextcloud_domain
     db_password      = random_password.nextcloud_db.result
     admin_password   = random_password.nextcloud_admin.result
+    callback_url     = var.callback_url
+    workspace_id     = var.workspace_id
+    agent_secret     = var.agent_secret
   })
   
   depends_on = [hcloud_network_subnet.shared]
@@ -127,6 +133,9 @@ resource "hcloud_server" "keycloak" {
     keycloak_domain = var.keycloak_domain
     db_password     = random_password.keycloak_db.result
     admin_password  = random_password.keycloak_admin.result
+    callback_url    = var.callback_url
+    workspace_id    = var.workspace_id
+    agent_secret    = var.agent_secret
   })
   
   depends_on = [hcloud_network_subnet.shared]

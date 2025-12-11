@@ -1,5 +1,5 @@
 #cloud-config
-# Central Keycloak Server - Multi-Realm IAM
+# Central Keycloak Server - Multi-Realm IAM with Status Server
 
 package_update: true
 package_upgrade: true
@@ -8,6 +8,8 @@ packages:
   - docker.io
   - docker-compose
   - curl
+  - jq
+  - python3
 
 write_files:
   - path: /opt/keycloak/docker-compose.yml
@@ -65,11 +67,256 @@ write_files:
       volumes:
         postgres-data:
 
+  - path: /opt/swiss365/status-server.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      """Swiss365 Unified Status Server for Keycloak"""
+      import http.server
+      import json
+      import subprocess
+      import os
+      import hashlib
+      import hmac
+      import time
+      from urllib.parse import urlparse, parse_qs
+
+      STATUS_PORT = 8081
+      AGENT_PORT = 9365
+      AGENT_SECRET = "${agent_secret}"
+
+      def run_cmd(cmd, timeout=30):
+          try:
+              result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+              return result.stdout.strip(), result.returncode
+          except Exception as e:
+              return str(e), 1
+
+      def get_docker_status():
+          containers = []
+          output, _ = run_cmd("docker ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}'")
+          for line in output.split('\n'):
+              if '|' in line:
+                  parts = line.split('|')
+                  containers.append({
+                      'name': parts[0],
+                      'status': parts[1],
+                      'image': parts[2] if len(parts) > 2 else ''
+                  })
+          return containers
+
+      def get_system_metrics():
+          cpu, _ = run_cmd("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'")
+          mem, _ = run_cmd("free -m | awk 'NR==2{printf \"%.1f\", $3*100/$2}'")
+          disk, _ = run_cmd("df -h / | awk 'NR==2{print $5}' | tr -d '%'")
+          return {'cpu': cpu, 'memory': mem, 'disk': disk}
+
+      def get_keycloak_health():
+          # Check Keycloak health endpoint
+          status, _ = run_cmd("curl -s -o /dev/null -w '%{http_code}' http://localhost/health 2>/dev/null || echo '0'")
+          # Check critical containers
+          keycloak, _ = run_cmd("docker ps -q -f name=keycloak -f status=running")
+          postgres, _ = run_cmd("docker ps -q -f name=keycloak-postgres -f status=running")
+          return {
+              'api_responding': status in ['200', '404'],  # 404 is OK, means KC is running but no /health
+              'keycloak_running': bool(keycloak),
+              'postgres_running': bool(postgres)
+          }
+
+      def get_install_logs():
+          logs = []
+          log_file = '/var/log/swiss365-install.log'
+          if os.path.exists(log_file):
+              with open(log_file, 'r') as f:
+                  logs = f.readlines()[-100:]
+          return [l.strip() for l in logs]
+
+      class StatusHandler(http.server.BaseHTTPRequestHandler):
+          def log_message(self, format, *args):
+              pass
+
+          def send_json(self, data, status=200):
+              self.send_response(status)
+              self.send_header('Content-Type', 'application/json')
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.end_headers()
+              self.wfile.write(json.dumps(data).encode())
+
+          def do_GET(self):
+              path = urlparse(self.path).path
+              
+              if path == '/health':
+                  self.send_json({'status': 'ok', 'service': 'keycloak'})
+              elif path == '/status':
+                  health = get_keycloak_health()
+                  self.send_json({
+                      'service': 'keycloak',
+                      'timestamp': time.time(),
+                      'healthy': all(health.values()),
+                      'health': health,
+                      'docker': get_docker_status(),
+                      'metrics': get_system_metrics()
+                  })
+              elif path == '/docker':
+                  self.send_json({'containers': get_docker_status()})
+              elif path == '/metrics':
+                  self.send_json(get_system_metrics())
+              elif path == '/logs':
+                  self.send_json({'logs': get_install_logs()})
+              else:
+                  self.send_json({'error': 'Not found'}, 404)
+
+      class AgentHandler(http.server.BaseHTTPRequestHandler):
+          def log_message(self, format, *args):
+              pass
+
+          def verify_signature(self):
+              sig = self.headers.get('X-Signature', '')
+              content_length = int(self.headers.get('Content-Length', 0))
+              body = self.rfile.read(content_length).decode() if content_length > 0 else ''
+              expected = hmac.new(AGENT_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+              return hmac.compare_digest(sig, expected), body
+
+          def send_json(self, data, status=200):
+              self.send_response(status)
+              self.send_header('Content-Type', 'application/json')
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.end_headers()
+              self.wfile.write(json.dumps(data).encode())
+
+          def do_OPTIONS(self):
+              self.send_response(200)
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+              self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Signature')
+              self.end_headers()
+
+          def do_POST(self):
+              valid, body = self.verify_signature()
+              if not valid:
+                  self.send_json({'error': 'Invalid signature'}, 401)
+                  return
+
+              path = urlparse(self.path).path
+              params = json.loads(body) if body else {}
+
+              if path == '/restart':
+                  service = params.get('service', 'all')
+                  if service == 'all':
+                      output, code = run_cmd('cd /opt/keycloak && docker-compose restart')
+                  else:
+                      output, code = run_cmd(f'docker restart {service}')
+                  self.send_json({'success': code == 0, 'output': output})
+              elif path == '/logs':
+                  service = params.get('service', '')
+                  lines = params.get('lines', 100)
+                  if service:
+                      output, _ = run_cmd(f'docker logs --tail {lines} {service} 2>&1')
+                  else:
+                      output, _ = run_cmd(f'tail -n {lines} /var/log/swiss365-install.log')
+                  self.send_json({'logs': output})
+              elif path == '/execute':
+                  cmd = params.get('command', '')
+                  if cmd in ['docker-compose up -d', 'docker-compose down', 'docker-compose restart']:
+                      output, code = run_cmd(f'cd /opt/keycloak && {cmd}')
+                      self.send_json({'success': code == 0, 'output': output})
+                  else:
+                      self.send_json({'error': 'Command not allowed'}, 403)
+              else:
+                  self.send_json({'error': 'Not found'}, 404)
+
+      if __name__ == '__main__':
+          import threading
+          
+          status_server = http.server.HTTPServer(('0.0.0.0', STATUS_PORT), StatusHandler)
+          status_thread = threading.Thread(target=status_server.serve_forever)
+          status_thread.daemon = True
+          status_thread.start()
+          print(f"Status server running on port {STATUS_PORT}")
+          
+          agent_server = http.server.HTTPServer(('0.0.0.0', AGENT_PORT), AgentHandler)
+          print(f"Agent server running on port {AGENT_PORT}")
+          agent_server.serve_forever()
+
+  - path: /etc/systemd/system/swiss365-status.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Swiss365 Status Server
+      After=network.target docker.service
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3 /opt/swiss365/status-server.py
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/swiss365-callback
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      STATUS=$1
+      STEP=$2
+      PROGRESS=$3
+      DETAILS=$4
+      
+      CALLBACK_URL="${callback_url}"
+      WORKSPACE_ID="${workspace_id}"
+      SERVER_TYPE="keycloak"
+      
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> /var/log/swiss365-install.log
+      
+      if [ -n "$CALLBACK_URL" ]; then
+        curl -s -X POST "$CALLBACK_URL" \
+          -H "Content-Type: application/json" \
+          -d "{\"workspace_id\":\"$WORKSPACE_ID\",\"server_type\":\"$SERVER_TYPE\",\"status\":\"$STATUS\",\"current_step\":\"$STEP\",\"progress\":$PROGRESS,\"details\":\"$DETAILS\",\"server_ip\":\"$(hostname -I | awk '{print $1}')\"}" \
+          || true
+      fi
+
 runcmd:
+  - mkdir -p /opt/swiss365
+  - mkdir -p /opt/keycloak
+  - touch /var/log/swiss365-install.log
+  - swiss365-callback "installing" "init" 5 "Starting Keycloak installation"
+  
   - systemctl enable docker
   - systemctl start docker
-  - mkdir -p /opt/keycloak
+  - swiss365-callback "installing" "docker" 15 "Docker started"
+  
+  - swiss365-callback "installing" "pull" 30 "Pulling Docker images"
+  - cd /opt/keycloak && docker-compose pull
+  
+  - swiss365-callback "installing" "start" 50 "Starting Keycloak containers"
   - cd /opt/keycloak && docker-compose up -d
   
   # Wait for Keycloak to initialize
+  - swiss365-callback "installing" "wait" 60 "Waiting for Keycloak to initialize"
   - sleep 120
+  
+  # Create default realm
+  - swiss365-callback "installing" "realm" 80 "Creating default realm"
+  - |
+    # Wait for Keycloak to be ready
+    for i in {1..30}; do
+      if curl -s http://localhost/health/ready > /dev/null 2>&1; then
+        break
+      fi
+      sleep 10
+    done
+  
+  # Start status server
+  - swiss365-callback "installing" "status-server" 90 "Starting status server"
+  - systemctl daemon-reload
+  - systemctl enable swiss365-status
+  - systemctl start swiss365-status
+  
+  # Configure firewall
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 8081/tcp
+  - ufw allow 9365/tcp
+  
+  - swiss365-callback "ready" "complete" 100 "Keycloak installation complete"

@@ -83,3 +83,18 @@ variable "supabase_service_key" {
   sensitive   = true
   default     = ""
 }
+
+# Agent authentication secret for status server
+variable "agent_secret" {
+  description = "HMAC secret for authenticating agent commands"
+  type        = string
+  sensitive   = true
+  default     = "swiss365-agent-secret"
+}
+
+# Workspace ID for callbacks (empty for shared infrastructure)
+variable "workspace_id" {
+  description = "Workspace ID for installation callbacks"
+  type        = string
+  default     = "shared-infrastructure"
+}
