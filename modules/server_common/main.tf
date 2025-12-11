@@ -1,6 +1,6 @@
 # Server Common Module - Standard server with xrdp
 # This module creates standard servers with RDP access
-# All servers use cx32 server type and fsn1 location
+# All servers use cx33 server type and fsn1 location
 
 terraform {
   required_providers {
@@ -18,7 +18,7 @@ variable "name" {
 variable "server_type" {
   description = "Hetzner server type"
   type        = string
-  default     = "cx32"
+  default     = "cx33"
 }
 
 variable "image" {

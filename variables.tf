@@ -64,17 +64,17 @@ variable "ssh_private_key" {
 variable "server_type_control" {
   description = "Server type for Control Node (Guacamole)"
   type        = string
-  default     = "cx32"
+  default     = "cx33"
 }
 
 variable "server_type_workspace" {
   description = "Server type for Workspace and Desktop Pool servers"
   type        = string
-  default     = "cx32"
+  default     = "cx33"
 }
 
 variable "server_type_services" {
   description = "Server type for service servers (Mailcow, Nextcloud, Keycloak)"
   type        = string
-  default     = "cx32"
+  default     = "cx33"
 }
