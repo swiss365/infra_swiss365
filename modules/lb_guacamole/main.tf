@@ -1,6 +1,7 @@
 # Load Balancer Module for Guacamole
 # Routes traffic to Control Node on port 8080
 # Health check path: /guacamole/
+# Updated: 2025-12-11 - HTTPS removed (requires managed certificate)
 
 terraform {
   required_providers {
@@ -71,7 +72,7 @@ resource "hcloud_load_balancer_target" "this" {
   depends_on = [hcloud_load_balancer_network.this]
 }
 
-# HTTP Service (port 80 -> 8080)
+# HTTP Service (port 80 -> 8080) - Only HTTP, no HTTPS
 resource "hcloud_load_balancer_service" "http" {
   load_balancer_id = hcloud_load_balancer.this.id
   protocol         = "http"
@@ -99,8 +100,12 @@ resource "hcloud_load_balancer_service" "http" {
   }
 }
 
-# NOTE: HTTPS disabled - requires managed certificate
-# To enable HTTPS, add hcloud_managed_certificate resource first
+# HTTPS Service removed - requires hcloud_managed_certificate
+# To enable HTTPS later, create a managed certificate first:
+# resource "hcloud_managed_certificate" "cert" {
+#   name         = "swiss365-cert"
+#   domain_names = [var.domain_name]
+# }
 
 output "ipv4" {
   description = "Public IPv4 address of the load balancer"
