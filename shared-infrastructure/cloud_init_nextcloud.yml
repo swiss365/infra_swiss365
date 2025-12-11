@@ -117,7 +117,7 @@ write_files:
 
       def get_nextcloud_health():
           # Check Nextcloud status endpoint
-          status, _ = run_cmd("curl -s -o /dev/null -w '%{http_code}' http://localhost/status.php 2>/dev/null || echo '0'")
+          status, _ = run_cmd("curl -s -o /dev/null -w '%%{http_code}' http://localhost/status.php 2>/dev/null || echo '0'")
           # Check critical containers
           nextcloud, _ = run_cmd("docker ps -q -f name=nextcloud -f status=running")
           db, _ = run_cmd("docker ps -q -f name=nextcloud-db -f status=running")

@@ -113,7 +113,7 @@ write_files:
 
       def get_keycloak_health():
           # Check Keycloak health endpoint
-          status, _ = run_cmd("curl -s -o /dev/null -w '%{http_code}' http://localhost/health 2>/dev/null || echo '0'")
+          status, _ = run_cmd("curl -s -o /dev/null -w '%%{http_code}' http://localhost/health 2>/dev/null || echo '0'")
           # Check critical containers
           keycloak, _ = run_cmd("docker ps -q -f name=keycloak -f status=running")
           postgres, _ = run_cmd("docker ps -q -f name=keycloak-postgres -f status=running")

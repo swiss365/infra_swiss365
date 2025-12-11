@@ -59,7 +59,7 @@ write_files:
 
       def get_mailcow_health():
           # Check Mailcow API
-          api_status, _ = run_cmd("curl -s -o /dev/null -w '%{http_code}' http://localhost/api/v1/get/status/containers 2>/dev/null || echo '0'")
+          api_status, _ = run_cmd("curl -s -o /dev/null -w '%%{http_code}' http://localhost/api/v1/get/status/containers 2>/dev/null || echo '0'")
           # Check critical services
           postfix, _ = run_cmd("docker ps -q -f name=postfix-mailcow -f status=running")
           dovecot, _ = run_cmd("docker ps -q -f name=dovecot-mailcow -f status=running")

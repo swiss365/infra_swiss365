@@ -175,7 +175,7 @@ write_files:
               
               # Check Guacamole HTTP
               try:
-                  result = subprocess.run(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                  result = subprocess.run(['curl', '-s', '-o', '/dev/null', '-w', '%%{http_code}', 
                                           'http://localhost:8080/guacamole/'], 
                                         capture_output=True, text=True, timeout=10)
                   status['services']['guacamole'] = 'running' if result.stdout == '200' else f'http_{result.stdout}'
