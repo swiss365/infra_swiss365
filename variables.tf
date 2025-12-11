@@ -52,11 +52,19 @@ variable "subnet_cidr" {
   default     = "10.0.1.0/24"
 }
 
+# SSH Private Key (optional, for internal use)
+variable "ssh_private_key" {
+  description = "SSH private key for server access (base64 encoded)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # Server Type Variables - Customer configurable
 variable "server_type_control" {
   description = "Server type for Control Node (Guacamole)"
   type        = string
-  default     = "cx22"
+  default     = "cx32"
 }
 
 variable "server_type_workspace" {
