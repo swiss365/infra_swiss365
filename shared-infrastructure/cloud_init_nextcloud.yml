@@ -15,7 +15,7 @@ write_files:
   - path: /opt/nextcloud/docker-compose.yml
     permissions: '0644'
     content: |
-      version: '3.8'
+      version: '2.4'
       
       services:
         db:
@@ -131,7 +131,7 @@ write_files:
 
       def get_install_logs():
           logs = []
-          log_file = '/var/log/swiss365-install.log'
+          log_file = '/var/log/swiss365/install.log'
           if os.path.exists(log_file):
               with open(log_file, 'r') as f:
                   logs = f.readlines()[-100:]
@@ -219,7 +219,7 @@ write_files:
                   if service:
                       output, _ = run_cmd(f'docker logs --tail {lines} {service} 2>&1')
                   else:
-                      output, _ = run_cmd(f'tail -n {lines} /var/log/swiss365-install.log')
+                      output, _ = run_cmd(f'tail -n {lines} /var/log/swiss365/install.log')
                   self.send_json({'logs': output})
               elif path == '/occ':
                   cmd = params.get('command', '')
@@ -263,6 +263,8 @@ write_files:
       ExecStart=/usr/bin/python3 /opt/swiss365/status-server.py
       Restart=always
       RestartSec=5
+      StandardOutput=append:/var/log/swiss365/status-server.log
+      StandardError=append:/var/log/swiss365/status-server.log
 
       [Install]
       WantedBy=multi-user.target
@@ -280,7 +282,8 @@ write_files:
       WORKSPACE_ID="${workspace_id}"
       SERVER_TYPE="nextcloud"
       
-      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> /var/log/swiss365-install.log
+      mkdir -p /var/log/swiss365
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> /var/log/swiss365/install.log
       
       if [ -n "$CALLBACK_URL" ]; then
         curl -s -X POST "$CALLBACK_URL" \
@@ -292,7 +295,8 @@ write_files:
 runcmd:
   - mkdir -p /opt/swiss365
   - mkdir -p /opt/nextcloud
-  - touch /var/log/swiss365-install.log
+  - mkdir -p /var/log/swiss365
+  - touch /var/log/swiss365/install.log
   - swiss365-callback "installing" "init" 5 "Starting Nextcloud installation"
   
   - systemctl enable docker
@@ -302,15 +306,41 @@ runcmd:
   - swiss365-callback "installing" "pull" 30 "Pulling Docker images"
   - cd /opt/nextcloud && docker-compose pull
   
-  - swiss365-callback "installing" "start" 50 "Starting Nextcloud containers"
-  - cd /opt/nextcloud && docker-compose up -d
+  # Start database and redis first
+  - swiss365-callback "installing" "database" 40 "Starting database and redis"
+  - cd /opt/nextcloud && docker-compose up -d db redis
   
-  # Wait for Nextcloud to initialize
-  - swiss365-callback "installing" "wait" 60 "Waiting for Nextcloud to initialize"
-  - sleep 180
+  # Wait for database to be ready
+  - |
+    for i in {1..30}; do
+      if docker exec nextcloud-db mysqladmin ping -h localhost -u root -p${db_password} --silent 2>/dev/null; then
+        echo "MariaDB is ready"
+        break
+      fi
+      echo "Waiting for MariaDB... ($i/30)"
+      sleep 5
+    done
+  - swiss365-callback "installing" "database" 50 "Database ready"
+  
+  # Now start Nextcloud
+  - swiss365-callback "installing" "start" 55 "Starting Nextcloud"
+  - cd /opt/nextcloud && docker-compose up -d nextcloud
+  
+  # Real health check - wait for Nextcloud to respond
+  - swiss365-callback "installing" "healthcheck" 60 "Waiting for Nextcloud to be ready"
+  - |
+    for i in {1..60}; do
+      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/status.php 2>/dev/null || echo "000")
+      if [ "$HTTP_CODE" = "200" ]; then
+        swiss365-callback "installing" "healthcheck" 75 "Nextcloud responding"
+        break
+      fi
+      echo "Waiting for Nextcloud... ($i/60) HTTP: $HTTP_CODE"
+      sleep 5
+    done
   
   # Enable user provisioning API
-  - swiss365-callback "installing" "config" 75 "Enabling provisioning APIs"
+  - swiss365-callback "installing" "config" 80 "Enabling provisioning APIs"
   - docker exec -u www-data nextcloud php occ app:enable provisioning_api || true
   - docker exec -u www-data nextcloud php occ app:enable user_ldap || true
   
@@ -329,4 +359,11 @@ runcmd:
   - ufw allow 8081/tcp
   - ufw allow 9365/tcp
   
-  - swiss365-callback "ready" "complete" 100 "Nextcloud installation complete"
+  # Final health verification
+  - |
+    FINAL_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/status.php 2>/dev/null || echo "000")
+    if [ "$FINAL_CHECK" = "200" ]; then
+      swiss365-callback "ready" "complete" 100 "Nextcloud installation complete"
+    else
+      swiss365-callback "error" "healthcheck" 95 "Nextcloud not responding after installation (HTTP $FINAL_CHECK)"
+    fi

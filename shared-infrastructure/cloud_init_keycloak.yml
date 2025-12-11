@@ -15,7 +15,7 @@ write_files:
   - path: /opt/keycloak/docker-compose.yml
     permissions: '0644'
     content: |
-      version: '3.8'
+      version: '2.4'
       
       services:
         postgres:
@@ -30,19 +30,13 @@ write_files:
             - postgres-data:/var/lib/postgresql/data
           networks:
             - keycloak-net
-          healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
         
         keycloak:
           image: quay.io/keycloak/keycloak:23.0
           container_name: keycloak
           restart: always
           depends_on:
-            postgres:
-              condition: service_healthy
+            - postgres
           environment:
             KC_DB: postgres
             KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
@@ -125,7 +119,7 @@ write_files:
 
       def get_install_logs():
           logs = []
-          log_file = '/var/log/swiss365-install.log'
+          log_file = '/var/log/swiss365/install.log'
           if os.path.exists(log_file):
               with open(log_file, 'r') as f:
                   logs = f.readlines()[-100:]
@@ -213,7 +207,7 @@ write_files:
                   if service:
                       output, _ = run_cmd(f'docker logs --tail {lines} {service} 2>&1')
                   else:
-                      output, _ = run_cmd(f'tail -n {lines} /var/log/swiss365-install.log')
+                      output, _ = run_cmd(f'tail -n {lines} /var/log/swiss365/install.log')
                   self.send_json({'logs': output})
               elif path == '/execute':
                   cmd = params.get('command', '')
@@ -250,6 +244,8 @@ write_files:
       ExecStart=/usr/bin/python3 /opt/swiss365/status-server.py
       Restart=always
       RestartSec=5
+      StandardOutput=append:/var/log/swiss365/status-server.log
+      StandardError=append:/var/log/swiss365/status-server.log
 
       [Install]
       WantedBy=multi-user.target
@@ -267,7 +263,8 @@ write_files:
       WORKSPACE_ID="${workspace_id}"
       SERVER_TYPE="keycloak"
       
-      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> /var/log/swiss365-install.log
+      mkdir -p /var/log/swiss365
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> /var/log/swiss365/install.log
       
       if [ -n "$CALLBACK_URL" ]; then
         curl -s -X POST "$CALLBACK_URL" \
@@ -279,7 +276,8 @@ write_files:
 runcmd:
   - mkdir -p /opt/swiss365
   - mkdir -p /opt/keycloak
-  - touch /var/log/swiss365-install.log
+  - mkdir -p /var/log/swiss365
+  - touch /var/log/swiss365/install.log
   - swiss365-callback "installing" "init" 5 "Starting Keycloak installation"
   
   - systemctl enable docker
@@ -289,22 +287,37 @@ runcmd:
   - swiss365-callback "installing" "pull" 30 "Pulling Docker images"
   - cd /opt/keycloak && docker-compose pull
   
-  - swiss365-callback "installing" "start" 50 "Starting Keycloak containers"
-  - cd /opt/keycloak && docker-compose up -d
+  # Start PostgreSQL first and wait for it
+  - swiss365-callback "installing" "database" 40 "Starting PostgreSQL"
+  - cd /opt/keycloak && docker-compose up -d postgres
   
-  # Wait for Keycloak to initialize
-  - swiss365-callback "installing" "wait" 60 "Waiting for Keycloak to initialize"
-  - sleep 120
-  
-  # Create default realm
-  - swiss365-callback "installing" "realm" 80 "Creating default realm"
+  # Wait for PostgreSQL to be healthy
   - |
-    # Wait for Keycloak to be ready
     for i in {1..30}; do
-      if curl -s http://localhost/health/ready > /dev/null 2>&1; then
+      if docker exec keycloak-postgres pg_isready -U keycloak -d keycloak >/dev/null 2>&1; then
+        echo "PostgreSQL is ready"
         break
       fi
-      sleep 10
+      echo "Waiting for PostgreSQL... ($i/30)"
+      sleep 5
+    done
+  - swiss365-callback "installing" "database" 50 "PostgreSQL ready"
+  
+  # Now start Keycloak
+  - swiss365-callback "installing" "start" 55 "Starting Keycloak"
+  - cd /opt/keycloak && docker-compose up -d keycloak
+  
+  # Real health check - wait for Keycloak to respond
+  - swiss365-callback "installing" "healthcheck" 60 "Waiting for Keycloak to be ready"
+  - |
+    for i in {1..60}; do
+      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
+      if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "303" ]; then
+        swiss365-callback "installing" "healthcheck" 80 "Keycloak responding (HTTP $HTTP_CODE)"
+        break
+      fi
+      echo "Waiting for Keycloak... ($i/60) HTTP: $HTTP_CODE"
+      sleep 5
     done
   
   # Start status server
@@ -319,4 +332,11 @@ runcmd:
   - ufw allow 8081/tcp
   - ufw allow 9365/tcp
   
-  - swiss365-callback "ready" "complete" 100 "Keycloak installation complete"
+  # Final health verification before marking ready
+  - |
+    FINAL_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
+    if [ "$FINAL_CHECK" = "200" ] || [ "$FINAL_CHECK" = "302" ] || [ "$FINAL_CHECK" = "303" ]; then
+      swiss365-callback "ready" "complete" 100 "Keycloak installation complete"
+    else
+      swiss365-callback "error" "healthcheck" 95 "Keycloak not responding after installation (HTTP $FINAL_CHECK)"
+    fi

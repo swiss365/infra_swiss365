@@ -73,7 +73,7 @@ write_files:
 
       def get_install_logs():
           logs = []
-          log_file = '/var/log/swiss365-install.log'
+          log_file = '/var/log/swiss365/install.log'
           if os.path.exists(log_file):
               with open(log_file, 'r') as f:
                   logs = f.readlines()[-100:]
@@ -151,7 +151,7 @@ write_files:
               if path == '/restart':
                   service = params.get('service', 'all')
                   if service == 'all':
-                      output, code = run_cmd('cd /opt/mailcow-dockerized && docker-compose restart')
+                      output, code = run_cmd('cd /opt/mailcow && docker-compose restart')
                   else:
                       output, code = run_cmd(f'docker restart {service}')
                   self.send_json({'success': code == 0, 'output': output})
@@ -161,12 +161,12 @@ write_files:
                   if service:
                       output, _ = run_cmd(f'docker logs --tail {lines} {service} 2>&1')
                   else:
-                      output, _ = run_cmd(f'tail -n {lines} /var/log/swiss365-install.log')
+                      output, _ = run_cmd(f'tail -n {lines} /var/log/swiss365/install.log')
                   self.send_json({'logs': output})
               elif path == '/execute':
                   cmd = params.get('command', '')
                   if cmd in ['docker-compose up -d', 'docker-compose down', 'docker-compose restart']:
-                      output, code = run_cmd(f'cd /opt/mailcow-dockerized && {cmd}')
+                      output, code = run_cmd(f'cd /opt/mailcow && {cmd}')
                       self.send_json({'success': code == 0, 'output': output})
                   else:
                       self.send_json({'error': 'Command not allowed'}, 403)
@@ -200,6 +200,8 @@ write_files:
       ExecStart=/usr/bin/python3 /opt/swiss365/status-server.py
       Restart=always
       RestartSec=5
+      StandardOutput=append:/var/log/swiss365/status-server.log
+      StandardError=append:/var/log/swiss365/status-server.log
 
       [Install]
       WantedBy=multi-user.target
@@ -217,10 +219,9 @@ write_files:
       WORKSPACE_ID="${workspace_id}"
       SERVER_TYPE="mailcow"
       
-      # Log locally
-      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> /var/log/swiss365-install.log
+      mkdir -p /var/log/swiss365
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP ($PROGRESS%) - $DETAILS" >> /var/log/swiss365/install.log
       
-      # Send callback
       if [ -n "$CALLBACK_URL" ]; then
         curl -s -X POST "$CALLBACK_URL" \
           -H "Content-Type: application/json" \
@@ -230,7 +231,8 @@ write_files:
 
 runcmd:
   - mkdir -p /opt/swiss365
-  - touch /var/log/swiss365-install.log
+  - mkdir -p /var/log/swiss365
+  - touch /var/log/swiss365/install.log
   - swiss365-callback "installing" "init" 5 "Starting Mailcow installation"
   
   - systemctl enable docker
@@ -299,12 +301,21 @@ runcmd:
   - swiss365-callback "installing" "start" 60 "Starting Mailcow containers"
   - cd /opt/mailcow && docker-compose up -d
   
-  # Wait for startup
-  - swiss365-callback "installing" "wait" 70 "Waiting for services to initialize"
-  - sleep 120
+  # Real health check - wait for Mailcow to respond
+  - swiss365-callback "installing" "healthcheck" 70 "Waiting for services to be ready"
+  - |
+    for i in {1..60}; do
+      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
+      if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+        swiss365-callback "installing" "healthcheck" 80 "Mailcow web interface responding"
+        break
+      fi
+      echo "Waiting for Mailcow... ($i/60) HTTP: $HTTP_CODE"
+      sleep 10
+    done
   
   # Set admin password via API
-  - swiss365-callback "installing" "admin" 80 "Setting admin password"
+  - swiss365-callback "installing" "admin" 85 "Setting admin password"
   - |
     docker exec -i $(docker ps -qf "name=mailcow-php-fpm") php -r "
     \$pdo = new PDO('mysql:host=mysql;dbname=mailcow', 'mailcow', '${db_password}');
@@ -332,4 +343,11 @@ runcmd:
   - ufw allow 8081/tcp
   - ufw allow 9365/tcp
   
-  - swiss365-callback "ready" "complete" 100 "Mailcow installation complete"
+  # Final health verification
+  - |
+    FINAL_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
+    if [ "$FINAL_CHECK" = "200" ] || [ "$FINAL_CHECK" = "302" ]; then
+      swiss365-callback "ready" "complete" 100 "Mailcow installation complete"
+    else
+      swiss365-callback "error" "healthcheck" 95 "Mailcow not responding after installation (HTTP $FINAL_CHECK)"
+    fi

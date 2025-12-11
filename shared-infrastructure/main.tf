@@ -232,12 +232,12 @@ resource "hcloud_load_balancer_service" "nextcloud_https" {
   }
 }
 
-# Keycloak HTTPS Service (Port 443 -> 8443)
+# Keycloak HTTPS Service (Port 443 -> 80, Keycloak runs on port 80 internally)
 resource "hcloud_load_balancer_service" "keycloak_https" {
   load_balancer_id = hcloud_load_balancer.shared.id
   protocol         = "https"
   listen_port      = 9443  # Different port to avoid conflict
-  destination_port = 8443
+  destination_port = 80    # Keycloak runs on port 80 internally (mapped from 8080)
 
   http {
     sticky_sessions = true
@@ -246,15 +246,15 @@ resource "hcloud_load_balancer_service" "keycloak_https" {
 
   health_check {
     protocol = "http"
-    port     = 8443
+    port     = 80           # Health check on port 80 where Keycloak listens
     interval = 15
     timeout  = 10
     retries  = 3
 
     http {
       domain       = var.keycloak_domain
-      path         = "/health"
-      status_codes = ["200"]
+      path         = "/"    # Keycloak root path returns 200/302
+      status_codes = ["200", "302", "303"]  # Keycloak redirects on root
     }
   }
 }
