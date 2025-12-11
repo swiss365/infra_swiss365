@@ -1,0 +1,316 @@
+#cloud-config
+# Desktop + Guacamole Combined Server
+# Provides: xRDP Desktop + Guacamole Web Access
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - htop
+  - curl
+  - wget
+  - jq
+  - docker.io
+  - docker-compose
+  - xrdp
+  - xfce4
+  - xfce4-goodies
+  - dbus-x11
+  - python3
+
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: ${root_password}
+  encrypted: false
+
+ssh_pwauth: true
+
+write_files:
+  # Docker compose for Guacamole
+  - path: /opt/guacamole/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      
+      services:
+        guacd:
+          image: guacamole/guacd:latest
+          container_name: guacd
+          restart: always
+          networks:
+            - guacamole-net
+        
+        postgres:
+          image: postgres:15-alpine
+          container_name: guacamole-postgres
+          restart: always
+          environment:
+            POSTGRES_DB: guacamole
+            POSTGRES_USER: guacamole
+            POSTGRES_PASSWORD: ${guacamole_db_password}
+          volumes:
+            - postgres-data:/var/lib/postgresql/data
+            - /opt/guacamole/initdb:/docker-entrypoint-initdb.d:ro
+          networks:
+            - guacamole-net
+          healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U guacamole -d guacamole"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        
+        guacamole:
+          image: guacamole/guacamole:latest
+          container_name: guacamole
+          restart: always
+          depends_on:
+            postgres:
+              condition: service_healthy
+            guacd:
+              condition: service_started
+          environment:
+            GUACD_HOSTNAME: guacd
+            POSTGRES_HOSTNAME: postgres
+            POSTGRES_DATABASE: guacamole
+            POSTGRES_USER: guacamole
+            POSTGRES_PASSWORD: ${guacamole_db_password}
+          ports:
+            - "8080:8080"
+          networks:
+            - guacamole-net
+      
+      networks:
+        guacamole-net:
+          driver: bridge
+      
+      volumes:
+        postgres-data:
+
+  # Guacamole database init script generator
+  - path: /opt/guacamole/install.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      
+      echo "=== Generating Guacamole database schema ==="
+      mkdir -p /opt/guacamole/initdb
+      
+      # Generate schema SQL
+      docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > /opt/guacamole/initdb/01-schema.sql
+      
+      # Create admin user init script
+      cat > /opt/guacamole/initdb/02-admin.sql << 'EOSQL'
+      -- Set guacadmin password (salt + SHA-256 hash)
+      UPDATE guacamole_user 
+      SET password_salt = decode('${guacamole_db_password}', 'hex'),
+          password_hash = decode(encode(sha256(concat(decode('${guacamole_db_password}', 'hex'), '${guacamole_admin_password}')::bytea), 'hex'), 'hex')
+      WHERE entity_id = (SELECT entity_id FROM guacamole_entity WHERE name = 'guacadmin');
+      EOSQL
+      
+      echo "=== Schema files generated ==="
+      ls -la /opt/guacamole/initdb/
+
+  # Status server for health checks
+  - path: /opt/swiss365/status-server.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      import http.server
+      import json
+      import subprocess
+      import os
+      from datetime import datetime
+      
+      class StatusHandler(http.server.BaseHTTPRequestHandler):
+          def do_GET(self):
+              if self.path == '/status' or self.path == '/':
+                  status = self.get_status()
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.send_header('Access-Control-Allow-Origin', '*')
+                  self.end_headers()
+                  self.wfile.write(json.dumps(status).encode())
+              elif self.path == '/health':
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'text/plain')
+                  self.end_headers()
+                  self.wfile.write(b'OK')
+              else:
+                  self.send_response(404)
+                  self.end_headers()
+          
+          def do_OPTIONS(self):
+              self.send_response(200)
+              self.send_header('Access-Control-Allow-Origin', '*')
+              self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+              self.end_headers()
+          
+          def get_status(self):
+              status = {
+                  'timestamp': datetime.now().isoformat(),
+                  'server_role': 'desktop_guacamole',
+                  'customer_id': '${customer_id}',
+                  'services': {}
+              }
+              
+              # Check Docker
+              try:
+                  result = subprocess.run(['docker', 'ps', '--format', '{{.Names}}: {{.Status}}'], 
+                                        capture_output=True, text=True, timeout=10)
+                  status['services']['docker'] = 'running' if result.returncode == 0 else 'error'
+                  status['containers'] = result.stdout.strip().split('\n') if result.stdout else []
+              except:
+                  status['services']['docker'] = 'error'
+              
+              # Check xRDP
+              try:
+                  result = subprocess.run(['systemctl', 'is-active', 'xrdp'], 
+                                        capture_output=True, text=True, timeout=5)
+                  status['services']['xrdp'] = result.stdout.strip()
+              except:
+                  status['services']['xrdp'] = 'unknown'
+              
+              # Check Guacamole HTTP
+              try:
+                  result = subprocess.run(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                                          'http://localhost:8080/guacamole/'], 
+                                        capture_output=True, text=True, timeout=10)
+                  status['services']['guacamole'] = 'running' if result.stdout == '200' else f'http_{result.stdout}'
+              except:
+                  status['services']['guacamole'] = 'error'
+              
+              # Load installation log
+              try:
+                  with open('/var/log/swiss365/install.log', 'r') as f:
+                      status['install_log'] = f.read().split('\n')[-20:]
+              except:
+                  status['install_log'] = []
+              
+              return status
+          
+          def log_message(self, format, *args):
+              pass
+      
+      if __name__ == '__main__':
+          server = http.server.HTTPServer(('0.0.0.0', 8081), StatusHandler)
+          print('Status server running on port 8081')
+          server.serve_forever()
+
+  # Installation callback script
+  - path: /usr/local/bin/swiss365-callback
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      STATUS="$1"
+      STEP="$2"
+      PROGRESS="$3"
+      DETAILS="$4"
+      
+      CALLBACK_URL="${callback_url}"
+      
+      if [ -n "$CALLBACK_URL" ]; then
+        curl -s -X POST "$CALLBACK_URL" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"workspace_id\": \"${customer_id}\",
+            \"server_type\": \"desktop_guacamole\",
+            \"status\": \"$STATUS\",
+            \"current_step\": \"$STEP\",
+            \"progress\": $PROGRESS,
+            \"details\": \"$DETAILS\"
+          }" || true
+      fi
+      
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [$STATUS] $STEP - $DETAILS" >> /var/log/swiss365/install.log
+
+runcmd:
+  # Create log directories
+  - mkdir -p /var/log/swiss365
+  - mkdir -p /opt/swiss365
+  
+  # Send initial callback
+  - swiss365-callback "installing" "init" 5 "Server boot completed"
+  
+  # Configure SSH
+  - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+  - systemctl restart ssh
+  - swiss365-callback "installing" "ssh" 10 "SSH configured"
+  
+  # Configure xRDP
+  - swiss365-callback "installing" "xrdp" 15 "Configuring xRDP desktop"
+  - echo "xfce4-session" > /root/.xsession
+  - chmod +x /root/.xsession
+  - sed -i 's/^test -x/# test -x/' /etc/xrdp/startwm.sh
+  - echo "startxfce4" >> /etc/xrdp/startwm.sh
+  - systemctl enable xrdp
+  - systemctl start xrdp
+  - swiss365-callback "installing" "xrdp" 25 "xRDP desktop ready"
+  
+  # Start status server
+  - nohup python3 /opt/swiss365/status-server.py > /var/log/swiss365/status-server.log 2>&1 &
+  - swiss365-callback "installing" "status" 30 "Status server started"
+  
+  # Setup Docker
+  - swiss365-callback "installing" "docker" 35 "Configuring Docker"
+  - systemctl enable docker
+  - systemctl start docker
+  - swiss365-callback "installing" "docker" 40 "Docker running"
+  
+  # Generate Guacamole schema
+  - swiss365-callback "installing" "guacamole" 45 "Generating Guacamole database schema"
+  - cd /opt/guacamole && bash install.sh
+  - swiss365-callback "installing" "guacamole" 55 "Schema generated"
+  
+  # Start Guacamole stack
+  - swiss365-callback "installing" "guacamole" 60 "Starting Guacamole containers"
+  - cd /opt/guacamole && docker-compose up -d
+  - swiss365-callback "installing" "guacamole" 70 "Containers starting"
+  
+  # Wait for Guacamole to be ready
+  - |
+    for i in {1..30}; do
+      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
+      if [ "$HTTP_CODE" = "200" ]; then
+        swiss365-callback "installing" "guacamole" 85 "Guacamole responding"
+        break
+      fi
+      sleep 10
+    done
+  
+  # Configure local RDP connection in Guacamole
+  - swiss365-callback "installing" "connections" 90 "Configuring RDP connections"
+  - |
+    sleep 10
+    docker exec guacamole-postgres psql -U guacamole -d guacamole -c "
+    INSERT INTO guacamole_connection (connection_name, protocol) 
+    VALUES ('Local Desktop', 'rdp')
+    ON CONFLICT DO NOTHING;
+    
+    INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+    SELECT c.connection_id, p.parameter_name, p.parameter_value
+    FROM guacamole_connection c
+    CROSS JOIN (VALUES 
+      ('hostname', 'localhost'),
+      ('port', '3389'),
+      ('username', 'root'),
+      ('password', '${root_password}'),
+      ('security', 'any'),
+      ('ignore-cert', 'true')
+    ) AS p(parameter_name, parameter_value)
+    WHERE c.connection_name = 'Local Desktop'
+    ON CONFLICT DO NOTHING;
+    
+    INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
+    SELECT e.entity_id, c.connection_id, 'READ'
+    FROM guacamole_entity e, guacamole_connection c
+    WHERE e.name = 'guacadmin' AND c.connection_name = 'Local Desktop'
+    ON CONFLICT DO NOTHING;
+    " 2>/dev/null || true
+  
+  # Final status
+  - swiss365-callback "ready" "complete" 100 "Desktop + Guacamole ready"
+  - echo "$(date '+%Y-%m-%d %H:%M:%S') Installation complete" >> /var/log/swiss365/install.log

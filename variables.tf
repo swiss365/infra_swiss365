@@ -1,4 +1,6 @@
-# variables.tf - Input variables for Swiss365 infrastructure
+# variables.tf - Input variables for Swiss365 Shared Infrastructure Model
+# Customer provisioning now only creates a Desktop server
+# Mailcow, Nextcloud, Keycloak are SHARED central services
 
 variable "hcloud_token" {
   description = "Hetzner Cloud API Token"
@@ -14,6 +16,7 @@ variable "customer_id" {
 variable "guacamole_domain" {
   description = "Domain for Guacamole access (e.g., customer.swiss365.cloud)"
   type        = string
+  default     = ""
 }
 
 variable "ssh_key_name" {
@@ -60,21 +63,35 @@ variable "ssh_private_key" {
   sensitive   = true
 }
 
-# Server Type Variables - Customer configurable
+# Server Type for Desktop (Gen3 types only: cx33, cx43, cx53)
+variable "server_type_desktop" {
+  description = "Server type for Desktop Server (cx33, cx43, cx53)"
+  type        = string
+  default     = "cx33"
+}
+
+# Callback URL for installation progress
+variable "callback_url" {
+  description = "Supabase callback URL for installation progress"
+  type        = string
+  default     = ""
+}
+
+# Legacy variables (kept for backwards compatibility with existing Terraform workspace)
 variable "server_type_control" {
-  description = "Server type for Control Node (Guacamole)"
+  description = "Deprecated - maps to server_type_desktop in shared model"
   type        = string
   default     = "cx33"
 }
 
 variable "server_type_workspace" {
-  description = "Server type for Workspace and Desktop Pool servers"
+  description = "Deprecated - not used in shared infrastructure model"
   type        = string
   default     = "cx33"
 }
 
 variable "server_type_services" {
-  description = "Server type for service servers (Mailcow, Nextcloud, Keycloak)"
+  description = "Deprecated - services are now shared centrally"
   type        = string
   default     = "cx33"
 }
