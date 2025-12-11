@@ -16,13 +16,3 @@ resource "hcloud_network_subnet" "swiss365_subnet" {
   network_zone = var.network_zone
   ip_range     = var.subnet_cidr
 }
-
-output "network_id" {
-  description = "ID of the private network"
-  value       = hcloud_network.swiss365_net.id
-}
-
-output "subnet_id" {
-  description = "ID of the subnet"
-  value       = hcloud_network_subnet.swiss365_subnet.id
-}
