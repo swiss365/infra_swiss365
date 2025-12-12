@@ -1,5 +1,6 @@
 #cloud-config
 # Central Keycloak Server - Multi-Realm IAM with Status Server
+# IMPROVED: Docker-pull retry, admin login test, UFW activation
 
 package_update: true
 package_upgrade: true
@@ -107,12 +108,12 @@ write_files:
 
       def get_keycloak_health():
           # Check Keycloak health endpoint
-          status, _ = run_cmd("curl -s -o /dev/null -w '%%{http_code}' http://localhost/health 2>/dev/null || echo '0'")
+          status, _ = run_cmd("curl -s -o /dev/null -w '%%{http_code}' http://localhost/health/ready 2>/dev/null || echo '0'")
           # Check critical containers
           keycloak, _ = run_cmd("docker ps -q -f name=keycloak -f status=running")
           postgres, _ = run_cmd("docker ps -q -f name=keycloak-postgres -f status=running")
           return {
-              'api_responding': status in ['200', '404'],  # 404 is OK, means KC is running but no /health
+              'api_responding': status in ['200', '404'],  # 404 is OK, means KC is running
               'keycloak_running': bool(keycloak),
               'postgres_running': bool(postgres)
           }
@@ -273,6 +274,38 @@ write_files:
           || true
       fi
 
+  # Admin login test script
+  - path: /usr/local/bin/test-keycloak-login
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Test Keycloak admin login via token endpoint
+      ADMIN_USER="admin"
+      ADMIN_PASS="${admin_password}"
+      
+      echo "Testing Keycloak admin login..."
+      
+      # Get admin token
+      RESPONSE=$(curl -s -X POST \
+        "http://localhost/realms/master/protocol/openid-connect/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "grant_type=password" \
+        -d "client_id=admin-cli" \
+        -d "username=$ADMIN_USER" \
+        -d "password=$ADMIN_PASS" \
+        -w "\n%%{http_code}" 2>/dev/null)
+      
+      HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+      BODY=$(echo "$RESPONSE" | sed '$d')
+      
+      if [ "$HTTP_CODE" = "200" ] && echo "$BODY" | grep -q "access_token"; then
+        echo "Admin login verified successfully!"
+        exit 0
+      else
+        echo "Login test failed with HTTP $HTTP_CODE"
+        exit 1
+      fi
+
 runcmd:
   - mkdir -p /opt/swiss365
   - mkdir -p /opt/keycloak
@@ -284,41 +317,105 @@ runcmd:
   - systemctl start docker
   - swiss365-callback "installing" "docker" 15 "Docker started"
   
-  - swiss365-callback "installing" "pull" 30 "Pulling Docker images"
-  - cd /opt/keycloak && docker-compose pull
+  # Pull with retry logic
+  - swiss365-callback "installing" "pull" 25 "Pulling Docker images (with retry)"
+  - |
+    cd /opt/keycloak
+    for i in 1 2 3 4 5; do
+      echo "Docker-compose pull attempt $i..."
+      if docker-compose pull; then
+        echo "Pull successful on attempt $i"
+        break
+      fi
+      echo "Pull failed, waiting before retry..."
+      sleep $((i * 10))
+      if [ $i -eq 5 ]; then
+        swiss365-callback "error" "pull" 30 "Failed to pull Docker images after 5 attempts"
+        exit 1
+      fi
+    done
   
   # Start PostgreSQL first and wait for it
-  - swiss365-callback "installing" "database" 40 "Starting PostgreSQL"
+  - swiss365-callback "installing" "database" 35 "Starting PostgreSQL"
   - cd /opt/keycloak && docker-compose up -d postgres
   
-  # Wait for PostgreSQL to be healthy
+  # Wait for PostgreSQL to be healthy with robust check
   - |
-    for i in {1..30}; do
+    echo "Waiting for PostgreSQL..."
+    for i in {1..60}; do
       if docker exec keycloak-postgres pg_isready -U keycloak -d keycloak >/dev/null 2>&1; then
-        echo "PostgreSQL is ready"
-        break
+        # Double-check with actual query
+        if docker exec keycloak-postgres psql -U keycloak -d keycloak -c "SELECT 1" >/dev/null 2>&1; then
+          echo "PostgreSQL is ready"
+          break
+        fi
       fi
-      echo "Waiting for PostgreSQL... ($i/30)"
+      echo "Waiting for PostgreSQL... ($i/60)"
       sleep 5
     done
-  - swiss365-callback "installing" "database" 50 "PostgreSQL ready"
+  - swiss365-callback "installing" "database" 45 "PostgreSQL ready"
   
   # Now start Keycloak
-  - swiss365-callback "installing" "start" 55 "Starting Keycloak"
+  - swiss365-callback "installing" "start" 50 "Starting Keycloak"
   - cd /opt/keycloak && docker-compose up -d keycloak
   
-  # Real health check - wait for Keycloak to respond
-  - swiss365-callback "installing" "healthcheck" 60 "Waiting for Keycloak to be ready"
+  # Wait for Keycloak to be ready (it takes longer to initialize)
+  - swiss365-callback "installing" "healthcheck" 55 "Waiting for Keycloak to be ready"
   - |
-    for i in {1..60}; do
-      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
-      if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "303" ]; then
-        swiss365-callback "installing" "healthcheck" 80 "Keycloak responding (HTTP $HTTP_CODE)"
+    echo "Waiting for Keycloak to initialize..."
+    for i in {1..90}; do
+      # Check health endpoint first
+      HEALTH_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/health/ready 2>/dev/null || echo "000")
+      
+      if [ "$HEALTH_CODE" = "200" ]; then
+        swiss365-callback "installing" "healthcheck" 70 "Keycloak health endpoint responding"
         break
       fi
-      echo "Waiting for Keycloak... ($i/60) HTTP: $HTTP_CODE"
+      
+      # Fallback: check main page
+      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
+      if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "303" ]; then
+        swiss365-callback "installing" "healthcheck" 70 "Keycloak web responding (HTTP $HTTP_CODE)"
+        break
+      fi
+      
+      echo "Waiting for Keycloak... ($i/90) Health: $HEALTH_CODE, Web: $HTTP_CODE"
       sleep 5
     done
+  
+  # Test admin login
+  - swiss365-callback "installing" "login-test" 75 "Testing admin login"
+  - |
+    LOGIN_OK=false
+    for i in {1..30}; do
+      # Test admin token endpoint
+      TOKEN_RESPONSE=$(curl -s -X POST \
+        "http://localhost/realms/master/protocol/openid-connect/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "grant_type=password" \
+        -d "client_id=admin-cli" \
+        -d "username=admin" \
+        -d "password=${admin_password}" \
+        -w "\n%%{http_code}" 2>/dev/null)
+      
+      HTTP_CODE=$(echo "$TOKEN_RESPONSE" | tail -n1)
+      BODY=$(echo "$TOKEN_RESPONSE" | sed '$d')
+      
+      if [ "$HTTP_CODE" = "200" ] && echo "$BODY" | grep -q "access_token"; then
+        echo "Admin login verified successfully!"
+        LOGIN_OK=true
+        break
+      fi
+      
+      echo "Admin login test attempt $i - HTTP $HTTP_CODE"
+      sleep 5
+    done
+    
+    if [ "$LOGIN_OK" = "true" ]; then
+      swiss365-callback "installing" "login-test" 85 "Admin login verified"
+    else
+      echo "WARNING: Admin login test failed, but continuing..."
+    fi
   
   # Start status server
   - swiss365-callback "installing" "status-server" 90 "Starting status server"
@@ -326,17 +423,33 @@ runcmd:
   - systemctl enable swiss365-status
   - systemctl start swiss365-status
   
-  # Configure firewall
+  # Configure and ACTIVATE firewall
+  - ufw allow 22/tcp
   - ufw allow 80/tcp
   - ufw allow 443/tcp
   - ufw allow 8081/tcp
   - ufw allow 9365/tcp
+  - ufw --force enable
   
-  # Final health verification before marking ready
+  # Final health verification with login test
   - |
-    FINAL_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
-    if [ "$FINAL_CHECK" = "200" ] || [ "$FINAL_CHECK" = "302" ] || [ "$FINAL_CHECK" = "303" ]; then
-      swiss365-callback "ready" "complete" 100 "Keycloak installation complete"
+    # Test admin login
+    FINAL_TOKEN=$(curl -s -X POST \
+      "http://localhost/realms/master/protocol/openid-connect/token" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -d "grant_type=password" \
+      -d "client_id=admin-cli" \
+      -d "username=admin" \
+      -d "password=${admin_password}" 2>/dev/null)
+    
+    if echo "$FINAL_TOKEN" | grep -q "access_token"; then
+      swiss365-callback "ready" "complete" 100 "Keycloak installation complete - Admin login verified"
     else
-      swiss365-callback "error" "healthcheck" 95 "Keycloak not responding after installation (HTTP $FINAL_CHECK)"
+      # Fallback: check if web is responding
+      WEB_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
+      if [ "$WEB_CODE" = "200" ] || [ "$WEB_CODE" = "302" ] || [ "$WEB_CODE" = "303" ]; then
+        swiss365-callback "ready" "complete" 100 "Keycloak installation complete - Web verified"
+      else
+        swiss365-callback "error" "healthcheck" 95 "Keycloak not responding (HTTP $WEB_CODE)"
+      fi
     fi

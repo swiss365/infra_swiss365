@@ -1,5 +1,6 @@
 #cloud-config
 # Central Nextcloud Server - Multi-Tenant Storage with Status Server
+# IMPROVED: Docker-pull retry, admin login test, UFW activation
 
 package_update: true
 package_upgrade: true
@@ -292,6 +293,33 @@ write_files:
           || true
       fi
 
+  # Admin login test script
+  - path: /usr/local/bin/test-nextcloud-login
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Test Nextcloud admin login
+      ADMIN_USER="admin"
+      ADMIN_PASS="${admin_password}"
+      
+      echo "Testing Nextcloud admin login..."
+      
+      # Use OCS API to verify admin user
+      RESPONSE=$(curl -s -u "$ADMIN_USER:$ADMIN_PASS" \
+        "http://localhost/ocs/v2.php/cloud/user" \
+        -H "OCS-APIRequest: true" \
+        -w "\n%%{http_code}" 2>/dev/null)
+      
+      HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+      
+      if [ "$HTTP_CODE" = "200" ]; then
+        echo "Admin login verified successfully!"
+        exit 0
+      else
+        echo "Login test failed with HTTP $HTTP_CODE"
+        exit 1
+      fi
+
 runcmd:
   - mkdir -p /opt/swiss365
   - mkdir -p /opt/nextcloud
@@ -303,41 +331,100 @@ runcmd:
   - systemctl start docker
   - swiss365-callback "installing" "docker" 15 "Docker started"
   
-  - swiss365-callback "installing" "pull" 30 "Pulling Docker images"
-  - cd /opt/nextcloud && docker-compose pull
+  # Pull with retry logic
+  - swiss365-callback "installing" "pull" 25 "Pulling Docker images (with retry)"
+  - |
+    cd /opt/nextcloud
+    for i in 1 2 3 4 5; do
+      echo "Docker-compose pull attempt $i..."
+      if docker-compose pull; then
+        echo "Pull successful on attempt $i"
+        break
+      fi
+      echo "Pull failed, waiting before retry..."
+      sleep $((i * 10))
+      if [ $i -eq 5 ]; then
+        swiss365-callback "error" "pull" 30 "Failed to pull Docker images after 5 attempts"
+        exit 1
+      fi
+    done
   
   # Start database and redis first
-  - swiss365-callback "installing" "database" 40 "Starting database and redis"
+  - swiss365-callback "installing" "database" 35 "Starting database and redis"
   - cd /opt/nextcloud && docker-compose up -d db redis
   
-  # Wait for database to be ready
+  # Wait for database to be ready with robust check
   - |
-    for i in {1..30}; do
+    echo "Waiting for MariaDB..."
+    for i in {1..60}; do
+      # Try multiple methods to check DB readiness
       if docker exec nextcloud-db mysqladmin ping -h localhost -u root -p${db_password} --silent 2>/dev/null; then
-        echo "MariaDB is ready"
+        echo "MariaDB is ready (mysqladmin)"
         break
       fi
-      echo "Waiting for MariaDB... ($i/30)"
+      # Alternative: direct query test
+      if docker exec nextcloud-db mysql -u nextcloud -p${db_password} -e "SELECT 1" nextcloud 2>/dev/null; then
+        echo "MariaDB is ready (query test)"
+        break
+      fi
+      echo "Waiting for MariaDB... ($i/60)"
       sleep 5
     done
-  - swiss365-callback "installing" "database" 50 "Database ready"
+  - swiss365-callback "installing" "database" 45 "Database ready"
   
   # Now start Nextcloud
-  - swiss365-callback "installing" "start" 55 "Starting Nextcloud"
+  - swiss365-callback "installing" "start" 50 "Starting Nextcloud"
   - cd /opt/nextcloud && docker-compose up -d nextcloud
   
-  # Real health check - wait for Nextcloud to respond
-  - swiss365-callback "installing" "healthcheck" 60 "Waiting for Nextcloud to be ready"
+  # Wait for Nextcloud installation to complete
+  - swiss365-callback "installing" "healthcheck" 55 "Waiting for Nextcloud installation"
   - |
-    for i in {1..60}; do
-      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/status.php 2>/dev/null || echo "000")
-      if [ "$HTTP_CODE" = "200" ]; then
-        swiss365-callback "installing" "healthcheck" 75 "Nextcloud responding"
+    echo "Waiting for Nextcloud to initialize..."
+    for i in {1..90}; do
+      # Check if installation is complete via status.php
+      STATUS_RESPONSE=$(curl -s http://localhost/status.php 2>/dev/null)
+      if echo "$STATUS_RESPONSE" | grep -q '"installed":true'; then
+        echo "Nextcloud installation complete!"
         break
       fi
-      echo "Waiting for Nextcloud... ($i/60) HTTP: $HTTP_CODE"
+      
+      # Also check HTTP response
+      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/status.php 2>/dev/null || echo "000")
+      if [ "$HTTP_CODE" = "200" ]; then
+        swiss365-callback "installing" "healthcheck" 65 "Nextcloud status.php responding"
+      fi
+      
+      echo "Waiting for Nextcloud... ($i/90) HTTP: $HTTP_CODE"
       sleep 5
     done
+  
+  # Verify admin user exists
+  - swiss365-callback "installing" "verify-admin" 70 "Verifying admin user"
+  - |
+    ADMIN_OK=false
+    for i in {1..20}; do
+      # Test admin login via OCS API
+      OCS_RESPONSE=$(curl -s -u "admin:${admin_password}" \
+        "http://localhost/ocs/v2.php/cloud/user" \
+        -H "OCS-APIRequest: true" \
+        -w "\n%%{http_code}" 2>/dev/null)
+      
+      HTTP_CODE=$(echo "$OCS_RESPONSE" | tail -n1)
+      
+      if [ "$HTTP_CODE" = "200" ]; then
+        echo "Admin user verified successfully!"
+        ADMIN_OK=true
+        break
+      fi
+      
+      echo "Admin verification attempt $i - HTTP $HTTP_CODE"
+      sleep 5
+    done
+    
+    if [ "$ADMIN_OK" = "false" ]; then
+      echo "WARNING: Admin verification failed, checking if user exists via occ..."
+      docker exec -u www-data nextcloud php occ user:info admin || true
+    fi
   
   # Enable user provisioning API
   - swiss365-callback "installing" "config" 80 "Enabling provisioning APIs"
@@ -353,17 +440,31 @@ runcmd:
   - systemctl enable swiss365-status
   - systemctl start swiss365-status
   
-  # Configure firewall
+  # Configure and ACTIVATE firewall
+  - ufw allow 22/tcp
   - ufw allow 80/tcp
   - ufw allow 443/tcp
   - ufw allow 8081/tcp
   - ufw allow 9365/tcp
+  - ufw --force enable
   
-  # Final health verification
+  # Final health verification with login test
   - |
-    FINAL_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/status.php 2>/dev/null || echo "000")
-    if [ "$FINAL_CHECK" = "200" ]; then
-      swiss365-callback "ready" "complete" 100 "Nextcloud installation complete"
+    # Check status.php
+    STATUS_CHECK=$(curl -s http://localhost/status.php 2>/dev/null)
+    INSTALLED=$(echo "$STATUS_CHECK" | grep -q '"installed":true' && echo "true" || echo "false")
+    
+    # Check admin login
+    ADMIN_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" \
+      -u "admin:${admin_password}" \
+      "http://localhost/ocs/v2.php/cloud/user" \
+      -H "OCS-APIRequest: true" 2>/dev/null)
+    
+    if [ "$INSTALLED" = "true" ] && [ "$ADMIN_CHECK" = "200" ]; then
+      swiss365-callback "ready" "complete" 100 "Nextcloud installation complete - Admin verified"
+    elif [ "$INSTALLED" = "true" ]; then
+      swiss365-callback "ready" "complete" 100 "Nextcloud installation complete - Status verified"
     else
-      swiss365-callback "error" "healthcheck" 95 "Nextcloud not responding after installation (HTTP $FINAL_CHECK)"
+      HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/status.php 2>/dev/null || echo "000")
+      swiss365-callback "error" "healthcheck" 95 "Nextcloud not responding (HTTP $HTTP_CODE, Installed: $INSTALLED)"
     fi

@@ -37,6 +37,12 @@ resource "random_password" "keycloak_db" {
   special = false
 }
 
+# SEPARATE API key for Mailcow (not reusing DB password)
+resource "random_password" "mailcow_api_key" {
+  length  = 32
+  special = false
+}
+
 # Shared network for central services
 resource "hcloud_network" "shared" {
   name     = "shared-services-net"
@@ -72,7 +78,7 @@ resource "hcloud_server" "mailcow" {
     mailcow_domain   = var.mailcow_domain
     db_password      = random_password.mailcow_db.result
     admin_password   = random_password.mailcow_admin.result
-    api_key          = random_password.mailcow_db.result
+    api_key          = random_password.mailcow_api_key.result  # Separate API key
     callback_url     = var.callback_url
     workspace_id     = var.workspace_id
     agent_secret     = var.agent_secret

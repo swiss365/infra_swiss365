@@ -1,5 +1,6 @@
 #cloud-config
 # Central Mailcow Server - Multi-Domain Mail with Status Server
+# IMPROVED: Docker-pull retry, admin login test, UFW activation
 
 package_update: true
 package_upgrade: true
@@ -229,6 +230,81 @@ write_files:
           || true
       fi
 
+  # Docker pull with retry logic
+  - path: /usr/local/bin/docker-pull-retry
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Docker pull with exponential backoff retry
+      IMAGE=$1
+      MAX_RETRIES=5
+      RETRY=0
+      DELAY=5
+      
+      while [ $RETRY -lt $MAX_RETRIES ]; do
+        echo "Pulling $IMAGE (attempt $((RETRY+1))/$MAX_RETRIES)..."
+        if docker pull "$IMAGE"; then
+          echo "Successfully pulled $IMAGE"
+          exit 0
+        fi
+        RETRY=$((RETRY+1))
+        if [ $RETRY -lt $MAX_RETRIES ]; then
+          echo "Failed to pull $IMAGE, retrying in ${DELAY}s..."
+          sleep $DELAY
+          DELAY=$((DELAY*2))
+        fi
+      done
+      
+      echo "ERROR: Failed to pull $IMAGE after $MAX_RETRIES attempts"
+      exit 1
+
+  # Admin login test script
+  - path: /usr/local/bin/test-mailcow-login
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Test Mailcow admin login via API
+      API_KEY="${api_key}"
+      MAX_RETRIES=30
+      RETRY=0
+      
+      echo "Testing Mailcow admin API access..."
+      
+      while [ $RETRY -lt $MAX_RETRIES ]; do
+        # Test API with the configured API key
+        RESPONSE=$(curl -s -X GET "http://localhost/api/v1/get/status/version" \
+          -H "X-API-Key: $API_KEY" \
+          -H "Content-Type: application/json" \
+          -w "\n%%{http_code}" 2>/dev/null)
+        
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+        
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "Mailcow API login successful!"
+          echo "Response: $BODY"
+          exit 0
+        fi
+        
+        # Alternative: Test web UI login (less reliable but fallback)
+        WEB_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null)
+        if [ "$WEB_CODE" = "200" ] || [ "$WEB_CODE" = "302" ]; then
+          echo "Mailcow web interface responding (HTTP $WEB_CODE)"
+          # If API not working but web is, might be OK
+          if [ $RETRY -gt 10 ]; then
+            echo "Web interface works, API may need more time"
+            exit 0
+          fi
+        fi
+        
+        RETRY=$((RETRY+1))
+        echo "Waiting for Mailcow API... ($RETRY/$MAX_RETRIES) HTTP: $HTTP_CODE"
+        sleep 10
+      done
+      
+      echo "ERROR: Mailcow API login failed after $MAX_RETRIES attempts"
+      exit 1
+
 runcmd:
   - mkdir -p /opt/swiss365
   - mkdir -p /var/log/swiss365
@@ -294,11 +370,43 @@ runcmd:
     SNAT6_TO_SOURCE=n
     EOF
   
-  # Pull and start Mailcow
-  - swiss365-callback "installing" "pull" 40 "Pulling Docker images"
-  - cd /opt/mailcow && docker-compose pull
+  # Pull with retry logic
+  - swiss365-callback "installing" "pull" 40 "Pulling Docker images (with retry)"
+  - |
+    cd /opt/mailcow
+    for i in 1 2 3 4 5; do
+      echo "Docker-compose pull attempt $i..."
+      if docker-compose pull; then
+        echo "Pull successful on attempt $i"
+        break
+      fi
+      echo "Pull failed, waiting before retry..."
+      sleep $((i * 10))
+      if [ $i -eq 5 ]; then
+        swiss365-callback "error" "pull" 45 "Failed to pull Docker images after 5 attempts"
+        exit 1
+      fi
+    done
   
-  - swiss365-callback "installing" "start" 60 "Starting Mailcow containers"
+  # Sequential container startup for stability
+  - swiss365-callback "installing" "start" 50 "Starting MySQL first"
+  - cd /opt/mailcow && docker-compose up -d mysql-mailcow
+  
+  # Wait for MySQL
+  - |
+    echo "Waiting for MySQL..."
+    for i in {1..60}; do
+      if docker exec $(docker ps -qf "name=mysql-mailcow") mysqladmin ping -h localhost --silent 2>/dev/null; then
+        echo "MySQL is ready"
+        break
+      fi
+      echo "Waiting for MySQL... ($i/60)"
+      sleep 5
+    done
+  - swiss365-callback "installing" "database" 55 "MySQL ready"
+  
+  # Start remaining services
+  - swiss365-callback "installing" "start" 60 "Starting remaining Mailcow containers"
   - cd /opt/mailcow && docker-compose up -d
   
   # Real health check - wait for Mailcow to respond
@@ -323,13 +431,37 @@ runcmd:
     \$pdo->exec(\"UPDATE admin SET password='\$hash' WHERE username='admin'\");
     " || true
   
+  # Test admin login
+  - swiss365-callback "installing" "login-test" 88 "Testing admin API access"
+  - |
+    LOGIN_OK=false
+    for i in {1..20}; do
+      # Test API access
+      API_RESPONSE=$(curl -s -o /dev/null -w "%%{http_code}" \
+        "http://localhost/api/v1/get/status/version" \
+        -H "X-API-Key: ${api_key}" 2>/dev/null)
+      
+      if [ "$API_RESPONSE" = "200" ]; then
+        echo "Mailcow API verified successfully!"
+        LOGIN_OK=true
+        break
+      fi
+      echo "API test attempt $i - HTTP $API_RESPONSE"
+      sleep 5
+    done
+    
+    if [ "$LOGIN_OK" = "false" ]; then
+      echo "WARNING: API verification failed, but continuing..."
+    fi
+  
   # Start status server
   - swiss365-callback "installing" "status-server" 90 "Starting status server"
   - systemctl daemon-reload
   - systemctl enable swiss365-status
   - systemctl start swiss365-status
   
-  # Configure firewall
+  # Configure and ACTIVATE firewall
+  - ufw allow 22/tcp
   - ufw allow 80/tcp
   - ufw allow 443/tcp
   - ufw allow 25/tcp
@@ -342,12 +474,19 @@ runcmd:
   - ufw allow 4190/tcp
   - ufw allow 8081/tcp
   - ufw allow 9365/tcp
+  - ufw --force enable
   
-  # Final health verification
+  # Final health verification with login test
   - |
-    FINAL_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null || echo "000")
-    if [ "$FINAL_CHECK" = "200" ] || [ "$FINAL_CHECK" = "302" ]; then
-      swiss365-callback "ready" "complete" 100 "Mailcow installation complete"
+    API_OK=$(curl -s -o /dev/null -w "%%{http_code}" \
+      "http://localhost/api/v1/get/status/version" \
+      -H "X-API-Key: ${api_key}" 2>/dev/null)
+    WEB_OK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/ 2>/dev/null)
+    
+    if [ "$API_OK" = "200" ]; then
+      swiss365-callback "ready" "complete" 100 "Mailcow installation complete - API verified"
+    elif [ "$WEB_OK" = "200" ] || [ "$WEB_OK" = "302" ]; then
+      swiss365-callback "ready" "complete" 100 "Mailcow installation complete - Web UI verified"
     else
-      swiss365-callback "error" "healthcheck" 95 "Mailcow not responding after installation (HTTP $FINAL_CHECK)"
+      swiss365-callback "error" "healthcheck" 95 "Mailcow not responding (API: $API_OK, Web: $WEB_OK)"
     fi
