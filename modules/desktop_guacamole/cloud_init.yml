@@ -1,6 +1,7 @@
 #cloud-config
 # Desktop + Guacamole Combined Server
 # Provides: xRDP Desktop + Guacamole Web Access
+# Version: 2.0 - Robust database initialization with login verification
 
 package_update: true
 package_upgrade: true
@@ -81,21 +82,173 @@ write_files:
       volumes:
         postgres-data:
 
-  # Guacamole database init script generator
+  # Guacamole database init script generator - ROBUST VERSION
   - path: /opt/guacamole/install.sh
     permissions: '0755'
     content: |
       #!/bin/bash
       set -e
       
-      echo "=== Generating Guacamole database schema ==="
+      LOG="/var/log/swiss365/install.log"
+      
+      log() {
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [SCHEMA] $1" >> "$LOG"
+        echo "[SCHEMA] $1"
+      }
+      
+      log "=== Starting Guacamole schema generation ==="
       mkdir -p /opt/guacamole/initdb
       
-      # Generate schema SQL
-      docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > /opt/guacamole/initdb/01-schema.sql
+      # Pre-pull Docker images to avoid timeout during schema generation
+      log "Pulling Guacamole Docker image..."
+      docker pull guacamole/guacamole:latest
       
-      echo "=== Schema files generated ==="
-      ls -la /opt/guacamole/initdb/
+      # Generate schema SQL with retry
+      SCHEMA_FILE="/opt/guacamole/initdb/01-schema.sql"
+      for attempt in 1 2 3; do
+        log "Schema generation attempt $attempt/3..."
+        docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > "$SCHEMA_FILE" 2>> "$LOG"
+        
+        # Validate schema file is not empty and contains expected content
+        if [ -f "$SCHEMA_FILE" ] && [ -s "$SCHEMA_FILE" ]; then
+          SCHEMA_SIZE=$(wc -c < "$SCHEMA_FILE")
+          if [ "$SCHEMA_SIZE" -gt 1000 ]; then
+            # Check for critical table definitions
+            if grep -q "CREATE TABLE guacamole_user" "$SCHEMA_FILE"; then
+              log "Schema file generated successfully: $SCHEMA_SIZE bytes"
+              log "Schema contains guacamole_user table definition"
+              ls -la /opt/guacamole/initdb/ >> "$LOG"
+              exit 0
+            else
+              log "ERROR: Schema file missing guacamole_user table definition"
+            fi
+          else
+            log "ERROR: Schema file too small: $SCHEMA_SIZE bytes"
+          fi
+        else
+          log "ERROR: Schema file empty or not created"
+        fi
+        
+        sleep 5
+      done
+      
+      log "FATAL: Failed to generate valid schema after 3 attempts"
+      exit 1
+
+  # Manual schema application script
+  - path: /opt/guacamole/apply-schema.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Manually apply schema if auto-init failed
+      
+      LOG="/var/log/swiss365/install.log"
+      SCHEMA_FILE="/opt/guacamole/initdb/01-schema.sql"
+      
+      log() {
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [APPLY-SCHEMA] $1" >> "$LOG"
+        echo "[APPLY-SCHEMA] $1"
+      }
+      
+      # Check if tables already exist
+      TABLE_COUNT=$(docker exec guacamole-postgres psql -U guacamole -d guacamole -t -c \
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'guacamole_%';" 2>/dev/null | tr -d ' ')
+      
+      log "Current Guacamole table count: $TABLE_COUNT"
+      
+      if [ "$TABLE_COUNT" -lt 10 ]; then
+        log "Insufficient tables found, applying schema manually..."
+        
+        if [ ! -f "$SCHEMA_FILE" ] || [ ! -s "$SCHEMA_FILE" ]; then
+          log "ERROR: Schema file not found or empty: $SCHEMA_FILE"
+          exit 1
+        fi
+        
+        # Apply schema
+        docker exec -i guacamole-postgres psql -U guacamole -d guacamole < "$SCHEMA_FILE" 2>> "$LOG"
+        APPLY_RESULT=$?
+        
+        if [ $APPLY_RESULT -eq 0 ]; then
+          log "Schema applied successfully"
+          
+          # Verify tables now exist
+          sleep 3
+          NEW_TABLE_COUNT=$(docker exec guacamole-postgres psql -U guacamole -d guacamole -t -c \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'guacamole_%';" 2>/dev/null | tr -d ' ')
+          log "Table count after schema apply: $NEW_TABLE_COUNT"
+          
+          if [ "$NEW_TABLE_COUNT" -lt 10 ]; then
+            log "ERROR: Schema apply did not create expected tables"
+            exit 1
+          fi
+        else
+          log "ERROR: Schema apply failed with exit code $APPLY_RESULT"
+          exit 1
+        fi
+      else
+        log "Schema already initialized ($TABLE_COUNT tables found)"
+      fi
+      
+      # Verify guacadmin user exists
+      ADMIN_EXISTS=$(docker exec guacamole-postgres psql -U guacamole -d guacamole -t -c \
+        "SELECT COUNT(*) FROM guacamole_entity WHERE name = 'guacadmin';" 2>/dev/null | tr -d ' ')
+      
+      log "guacadmin user exists: $ADMIN_EXISTS"
+      
+      if [ "$ADMIN_EXISTS" != "1" ]; then
+        log "ERROR: guacadmin user not found in database after schema initialization"
+        exit 1
+      fi
+      
+      log "Database schema verification complete"
+      exit 0
+
+  # Login test script
+  - path: /opt/guacamole/test-login.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Test Guacamole login to verify full functionality
+      
+      LOG="/var/log/swiss365/install.log"
+      
+      log() {
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [LOGIN-TEST] $1" >> "$LOG"
+        echo "[LOGIN-TEST] $1"
+      }
+      
+      log "Testing Guacamole login with guacadmin..."
+      
+      for attempt in 1 2 3 4 5; do
+        log "Login attempt $attempt/5..."
+        
+        LOGIN_RESULT=$(curl -s -X POST http://localhost:8080/guacamole/api/tokens \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          -d "username=guacadmin&password=guacadmin" 2>/dev/null)
+        
+        log "Login response: $LOGIN_RESULT"
+        
+        if echo "$LOGIN_RESULT" | grep -q "authToken"; then
+          log "SUCCESS: Guacamole login verified!"
+          echo "SUCCESS"
+          exit 0
+        fi
+        
+        # Check for specific errors
+        if echo "$LOGIN_RESULT" | grep -q "Permission Denied"; then
+          log "ERROR: Permission denied - database might not be initialized properly"
+        elif echo "$LOGIN_RESULT" | grep -q "Invalid login"; then
+          log "ERROR: Invalid login - credentials might be wrong or user doesn't exist"
+        elif echo "$LOGIN_RESULT" | grep -q "Internal Server Error"; then
+          log "ERROR: Internal server error - database connection issue likely"
+        fi
+        
+        sleep 10
+      done
+      
+      log "FAILED: Could not verify Guacamole login after 5 attempts"
+      echo "FAILED"
+      exit 1
 
   # Status server for health checks (unified with systemd)
   - path: /opt/swiss365/status-server.py
@@ -356,57 +509,132 @@ runcmd:
   - echo "startxfce4" >> /etc/xrdp/startwm.sh
   - systemctl enable xrdp
   - systemctl start xrdp
-  - swiss365-callback "installing" "xrdp" 25 "xRDP desktop ready"
+  - swiss365-callback "installing" "xrdp" 20 "xRDP desktop ready"
   
   # Setup Docker
-  - swiss365-callback "installing" "docker" 30 "Configuring Docker"
+  - swiss365-callback "installing" "docker" 25 "Configuring Docker"
   - systemctl enable docker
   - systemctl start docker
-  - swiss365-callback "installing" "docker" 35 "Docker running"
   
-  # Generate Guacamole schema
-  - swiss365-callback "installing" "guacamole" 40 "Generating Guacamole database schema"
-  - cd /opt/guacamole && bash install.sh
-  - swiss365-callback "installing" "guacamole" 45 "Schema generated"
-  
-  # Start containers in sequence - first guacd and postgres
-  - swiss365-callback "installing" "guacamole" 50 "Starting backend services"
-  - cd /opt/guacamole && docker-compose up -d guacd postgres
-  
-  # Wait for PostgreSQL to be ready (real health check)
-  - swiss365-callback "installing" "guacamole" 55 "Waiting for database"
+  # Wait for Docker to be fully ready
   - |
     for i in {1..30}; do
-      if docker exec guacamole-postgres pg_isready -U guacamole -d guacamole >/dev/null 2>&1; then
-        echo "PostgreSQL is ready"
+      if docker info >/dev/null 2>&1; then
+        echo "Docker is ready"
         break
       fi
-      echo "Waiting for PostgreSQL... ($i/30)"
-      sleep 5
+      echo "Waiting for Docker... ($i/30)"
+      sleep 2
     done
-  - swiss365-callback "installing" "guacamole" 60 "Database ready"
+  - swiss365-callback "installing" "docker" 30 "Docker running"
+  
+  # Generate Guacamole schema with validation
+  - swiss365-callback "installing" "schema" 35 "Generating Guacamole database schema"
+  - |
+    cd /opt/guacamole
+    if bash install.sh; then
+      swiss365-callback "installing" "schema" 40 "Schema generated and validated"
+    else
+      swiss365-callback "error" "schema" 35 "Schema generation failed"
+      exit 1
+    fi
+  
+  # Pull remaining Docker images
+  - swiss365-callback "installing" "docker-images" 42 "Pulling Docker images"
+  - docker pull guacamole/guacd:latest
+  - docker pull postgres:15-alpine
+  - swiss365-callback "installing" "docker-images" 45 "Docker images ready"
+  
+  # Start guacd first (no dependencies)
+  - swiss365-callback "installing" "guacd" 48 "Starting guacd daemon"
+  - cd /opt/guacamole && docker-compose up -d guacd
+  - sleep 5
+  
+  # Start PostgreSQL
+  - swiss365-callback "installing" "postgres" 50 "Starting PostgreSQL database"
+  - cd /opt/guacamole && docker-compose up -d postgres
+  
+  # Wait for PostgreSQL to be FULLY ready (not just accepting connections)
+  - swiss365-callback "installing" "postgres" 52 "Waiting for database initialization"
+  - |
+    for i in {1..60}; do
+      if docker exec guacamole-postgres pg_isready -U guacamole -d guacamole >/dev/null 2>&1; then
+        # Additional check: can we actually run a query?
+        if docker exec guacamole-postgres psql -U guacamole -d guacamole -c "SELECT 1" >/dev/null 2>&1; then
+          echo "PostgreSQL is fully ready"
+          break
+        fi
+      fi
+      echo "Waiting for PostgreSQL... ($i/60)"
+      sleep 3
+    done
+  - swiss365-callback "installing" "postgres" 55 "Database accepting connections"
+  
+  # Wait for auto-init scripts to complete (initdb.d processing)
+  - swiss365-callback "installing" "schema-init" 58 "Waiting for schema initialization"
+  - sleep 15
+  
+  # Verify and apply schema if needed
+  - swiss365-callback "installing" "schema-verify" 60 "Verifying database schema"
+  - |
+    cd /opt/guacamole
+    if bash apply-schema.sh; then
+      swiss365-callback "installing" "schema-verify" 65 "Database schema verified"
+    else
+      swiss365-callback "error" "schema-verify" 60 "Database schema verification failed"
+      # Try one more time after a delay
+      sleep 10
+      if bash apply-schema.sh; then
+        swiss365-callback "installing" "schema-verify" 65 "Database schema verified on retry"
+      else
+        swiss365-callback "error" "schema-verify" 60 "Database schema verification failed after retry"
+        exit 1
+      fi
+    fi
   
   # Now start the guacamole web container
-  - swiss365-callback "installing" "guacamole" 65 "Starting Guacamole web interface"
+  - swiss365-callback "installing" "guacamole" 70 "Starting Guacamole web interface"
   - cd /opt/guacamole && docker-compose up -d guacamole
   
-  # Real health check - wait for Guacamole to respond
-  - swiss365-callback "installing" "healthcheck" 70 "Waiting for Guacamole to be ready"
+  # Wait for Guacamole to respond
+  - swiss365-callback "installing" "healthcheck" 75 "Waiting for Guacamole web interface"
   - |
-    for i in {1..30}; do
+    for i in {1..60}; do
       HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
       if [ "$HTTP_CODE" = "200" ]; then
-        swiss365-callback "installing" "healthcheck" 80 "Guacamole responding"
+        swiss365-callback "installing" "healthcheck" 80 "Guacamole web interface responding"
         break
       fi
-      echo "Waiting for Guacamole... ($i/30) HTTP: $HTTP_CODE"
-      sleep 10
+      echo "Waiting for Guacamole... ($i/60) HTTP: $HTTP_CODE"
+      sleep 5
     done
   
-  # Configure local RDP connection in Guacamole
-  - swiss365-callback "installing" "connections" 85 "Configuring RDP connections"
+  # Verify login works (critical test!)
+  - swiss365-callback "installing" "login-test" 82 "Testing Guacamole login"
   - |
-    sleep 5
+    cd /opt/guacamole
+    LOGIN_RESULT=$(bash test-login.sh)
+    if [ "$LOGIN_RESULT" = "SUCCESS" ]; then
+      swiss365-callback "installing" "login-test" 85 "Guacamole login verified"
+    else
+      swiss365-callback "error" "login-test" 82 "Guacamole login test failed - checking database"
+      # Emergency schema re-apply
+      docker exec guacamole-postgres psql -U guacamole -d guacamole -c "SELECT name FROM guacamole_entity LIMIT 5;" >> /var/log/swiss365/install.log 2>&1
+      # Try restarting guacamole container after schema verification
+      docker restart guacamole
+      sleep 20
+      LOGIN_RETRY=$(bash test-login.sh)
+      if [ "$LOGIN_RETRY" = "SUCCESS" ]; then
+        swiss365-callback "installing" "login-test" 85 "Guacamole login verified after restart"
+      else
+        swiss365-callback "error" "login-test" 82 "Guacamole login failed after all recovery attempts"
+      fi
+    fi
+  
+  # Configure local RDP connection in Guacamole
+  - swiss365-callback "installing" "connections" 88 "Configuring RDP connections"
+  - |
+    sleep 3
     docker exec guacamole-postgres psql -U guacamole -d guacamole -c "
     INSERT INTO guacamole_connection (connection_name, protocol) 
     VALUES ('Local Desktop', 'rdp')
@@ -431,10 +659,10 @@ runcmd:
     FROM guacamole_entity e, guacamole_connection c
     WHERE e.name = 'guacadmin' AND c.connection_name = 'Local Desktop'
     ON CONFLICT DO NOTHING;
-    " 2>/dev/null || true
+    " 2>/dev/null || echo "Connection setup warning (may already exist)"
   
   # Start status server via systemd
-  - swiss365-callback "installing" "status-server" 90 "Starting status server"
+  - swiss365-callback "installing" "status-server" 92 "Starting status server"
   - systemctl daemon-reload
   - systemctl enable swiss365-status
   - systemctl start swiss365-status
@@ -446,14 +674,23 @@ runcmd:
   - ufw allow 8081/tcp
   - ufw allow 9365/tcp
   
-  # Final health verification
+  # Final comprehensive health verification
   - |
-    GUAC_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
-    XRDP_CHECK=$(systemctl is-active xrdp)
-    if [ "$GUAC_CHECK" = "200" ] && [ "$XRDP_CHECK" = "active" ]; then
-      swiss365-callback "ready" "complete" 100 "Desktop + Guacamole ready"
+    GUAC_HTTP=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost:8080/guacamole/ 2>/dev/null || echo "000")
+    XRDP_STATUS=$(systemctl is-active xrdp)
+    
+    # Final login test
+    cd /opt/guacamole
+    FINAL_LOGIN=$(bash test-login.sh)
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [FINAL] Guacamole HTTP: $GUAC_HTTP, xRDP: $XRDP_STATUS, Login: $FINAL_LOGIN" >> /var/log/swiss365/install.log
+    
+    if [ "$GUAC_HTTP" = "200" ] && [ "$XRDP_STATUS" = "active" ] && [ "$FINAL_LOGIN" = "SUCCESS" ]; then
+      swiss365-callback "ready" "complete" 100 "Desktop + Guacamole fully operational (login verified)"
+    elif [ "$GUAC_HTTP" = "200" ] && [ "$XRDP_STATUS" = "active" ]; then
+      swiss365-callback "warning" "complete" 98 "Services running but login test inconclusive"
     else
-      swiss365-callback "error" "healthcheck" 95 "Services not ready (Guacamole: HTTP $GUAC_CHECK, xRDP: $XRDP_CHECK)"
+      swiss365-callback "error" "healthcheck" 95 "Services not fully ready (HTTP: $GUAC_HTTP, xRDP: $XRDP_STATUS, Login: $FINAL_LOGIN)"
     fi
   
   - echo "$(date '+%Y-%m-%d %H:%M:%S') Installation complete" >> /var/log/swiss365/install.log
